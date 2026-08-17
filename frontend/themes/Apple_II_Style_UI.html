@@ -1,0 +1,260 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ALPHABETA APPLE II</title>
+
+<style>
+*{
+    margin:0;
+    padding:0;
+    box-sizing:border-box;
+}
+
+body{
+    background:#000080; /* Apple II / early BASIC blue */
+    font-family: "Courier New", monospace;
+}
+
+/* CRT low-res feel */
+.crt{
+    position:fixed;
+    inset:0;
+    background:linear-gradient(rgba(255,255,255,0.03) 50%, rgba(0,0,0,0.15) 50%);
+    background-size:100% 4px;
+    opacity:0.3;
+    pointer-events:none;
+}
+
+/* main container */
+.screen{
+    max-width:1200px;
+    margin:0 auto;
+    padding:10px;
+}
+
+/* ===== TOP ===== */
+.top{
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    border:2px solid #00ff66;
+    padding:6px;
+    color:#00ff66;
+}
+
+.logo img{
+    height:50px;
+}
+
+.slogan{
+    flex:1;
+    text-align:center;
+    color:#ffd966; /* Apple II amber */
+    font-weight:bold;
+    letter-spacing:0.5px;
+}
+
+/* ===== MENU BAR ===== */
+.menu{
+    margin-top:4px;
+    border:2px solid #00ff66;
+    padding:4px;
+    color:#00ff66;
+}
+
+/* ===== INFO ===== */
+.info{
+    margin-top:4px;
+    border:2px solid #ffd966;
+    padding:4px;
+    display:flex;
+    justify-content:space-between;
+    color:#ffd966;
+    font-size:12px;
+}
+
+/* ===== MAIN ===== */
+.main{
+    margin-top:4px;
+    border:3px solid #00ff66;
+    height:430px;
+    padding:8px;
+    position:relative;
+    color:#00ff66;
+}
+
+/* ruler */
+.ruler{
+    border-bottom:2px dashed #ffd966;
+    margin-bottom:8px;
+    color:#ffd966;
+    font-size:11px;
+}
+
+/* text */
+.text{
+    white-space:pre-wrap;
+    color:#00ff66;
+    line-height:1.4;
+}
+
+/* cursor */
+.cursor{
+    display:inline-block;
+    width:8px;
+    height:14px;
+    background:#ffd966;
+    animation:blink 1s infinite;
+}
+
+@keyframes blink{
+    50%{opacity:0;}
+}
+
+/* ===== APPLE II POPUP ===== */
+.popup{
+    position:absolute;
+    top:50%;
+    left:50%;
+    transform:translate(-50%,-50%);
+    background:#000080;
+    border:3px solid #ffd966;
+    min-width:420px;
+    padding:12px;
+}
+
+.popup-title{
+    text-align:center;
+    margin-bottom:10px;
+    color:#ffd966;
+    font-weight:bold;
+}
+
+/* MENU ITEMS (UNCHANGED TEXT) */
+.item{
+    padding:6px;
+    cursor:pointer;
+    color:#00ff66;
+}
+
+.item:hover,
+.item.active{
+    background:#ffd966;
+    color:#000080;
+}
+
+/* hint */
+.hint{
+    margin-top:10px;
+    text-align:center;
+    color:#ffd966;
+    font-size:11px;
+}
+
+/* ===== STATUS ===== */
+.status{
+    margin-top:4px;
+    border:2px solid #00ff66;
+    padding:4px;
+    display:flex;
+    justify-content:space-between;
+    color:#00ff66;
+}
+
+/* ===== F KEYS ===== */
+.fkeys{
+    margin-top:4px;
+    border:2px solid #ffd966;
+    padding:4px;
+    display:flex;
+    justify-content:space-between;
+    color:#ffd966;
+}
+</style>
+</head>
+
+<body>
+
+<div class="crt"></div>
+
+<div class="screen">
+
+    <!-- TOP -->
+    <div class="top">
+        <div class="logo">
+            <img src="альфабета_логотип.png">
+        </div>
+
+        <div class="slogan">
+            Назад в будущее, вперед в прошлое: СЕРВИС СТУДРАБОТ
+        </div>
+
+        <div style="width:120px"></div>
+    </div>
+
+    <!-- MENU -->
+    <div class="menu">
+        ] LOAD STUDWORK
+    </div>
+
+    <!-- INFO -->
+    <div class="info">
+        <div>APPLE II BASIC MODE</div>
+        <div>HI-RES TEXT SYSTEM</div>
+    </div>
+
+    <!-- MAIN -->
+    <div class="main">
+
+        <div class="ruler">
+        ----------------------------------------
+        </div>
+
+        <div class="text">
+APPLE II SYSTEM READY
+BASIC INTERFACE LOADED
+LOW RES GRAPHICS MODE
+
+<span class="cursor"></span>
+        </div>
+
+        <!-- POPUP MENU -->
+        <div class="popup">
+            <div class="popup-title">MAIN MENU</div>
+
+            <div class="item active">1. Предоставить анализ проблемы (ядро исследования) - бесплатно</div>
+            <div class="item">2. Сформировать план курсовой работы - бесплатно</div>
+            <div class="item">3. Создать введение к курсовой работе (на основе плана)</div>
+            <div class="item">4. СОЗДАТЬ КУРСОВУЮ РАБОТУ</div>
+            <div class="item">5. Подобрать источники к курсовой работе</div>
+            <div class="item">6. Отформатировать курсовую работу по ГОСТ</div>
+            <div class="item">7. Проверить текст на ИИ (ИИ-детектор)</div>
+            <div class="item">8. Очеловечить работу (убрать ИИ-паттерны)</div>
+
+            <div class="hint">
+                PRESS RETURN
+            </div>
+        </div>
+
+    </div>
+
+    <!-- STATUS -->
+    <div class="status">
+        <div>READY</div>
+        <div>APPLE II EMULATION</div>
+    </div>
+
+    <!-- F KEYS -->
+    <div class="fkeys">
+        <div>F1 HELP</div>
+        <div>F3 LOAD</div>
+        <div>F5 RUN</div>
+        <div>F10 RESET</div>
+    </div>
+
+</div>
+
+</body>
+</html>

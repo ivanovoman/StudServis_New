@@ -1,0 +1,249 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ALPHABETA ZX SPECTRUM</title>
+
+<style>
+*{
+    margin:0;
+    padding:0;
+    box-sizing:border-box;
+}
+
+body{
+    background:#000080; /* classic ZX blue */
+    font-family: "Courier New", monospace;
+    color:#ffffff;
+}
+
+/* ZX style "attribute blocks" */
+.block{
+    margin:6px;
+    padding:6px;
+}
+
+/* TOP block */
+.top{
+    background:#ff00ff; /* magenta clash */
+    color:#000;
+    display:flex;
+    justify-content:space-between;
+    align-items:center;
+}
+
+/* logo */
+.logo img{
+    height:50px;
+    filter:contrast(1.5);
+}
+
+/* slogan */
+.slogan{
+    flex:1;
+    text-align:center;
+    font-weight:bold;
+}
+
+/* MENU BAR */
+.menu{
+    background:#00ff00; /* green clash */
+    color:#000;
+    padding:4px;
+    font-weight:bold;
+}
+
+/* INFO */
+.info{
+    background:#ffff00; /* yellow clash */
+    color:#000;
+    padding:4px;
+    display:flex;
+    justify-content:space-between;
+    font-size:12px;
+}
+
+/* MAIN AREA */
+.main{
+    background:#000000;
+    border:4px solid #ffffff;
+    height:430px;
+    position:relative;
+    padding:8px;
+}
+
+/* ruler */
+.ruler{
+    color:#00ffff;
+    border-bottom:2px solid #ffffff;
+    margin-bottom:8px;
+    font-size:11px;
+}
+
+/* text */
+.text{
+    color:#ffffff;
+    white-space:pre-wrap;
+    line-height:1.4;
+}
+
+/* cursor */
+.cursor{
+    display:inline-block;
+    width:8px;
+    height:14px;
+    background:#ffffff;
+    animation:blink 1s infinite;
+}
+
+@keyframes blink{
+    50%{opacity:0;}
+}
+
+/* ===== ZX POPUP MENU ===== */
+.popup{
+    position:absolute;
+    top:50%;
+    left:50%;
+    transform:translate(-50%,-50%);
+    border:4px solid #ffffff;
+    background:#0000ff; /* ZX deep blue */
+    min-width:420px;
+    padding:10px;
+}
+
+.popup-title{
+    background:#ff00ff;
+    color:#000;
+    text-align:center;
+    padding:4px;
+    font-weight:bold;
+    margin-bottom:8px;
+}
+
+/* ZX COLOUR CLASH ITEMS */
+.item{
+    padding:6px;
+    background:#00ff00;
+    color:#000;
+    margin-bottom:3px;
+}
+
+.item:nth-child(odd){
+    background:#ffff00; /* clash effect */
+}
+
+.item:hover,
+.item.active{
+    background:#ff0000;
+    color:#fff;
+}
+
+/* hint */
+.hint{
+    margin-top:8px;
+    text-align:center;
+    color:#ffffff;
+    font-size:11px;
+}
+
+/* STATUS */
+.status{
+    background:#00ffff;
+    color:#000;
+    padding:4px;
+    margin:6px;
+    display:flex;
+    justify-content:space-between;
+}
+
+/* F KEYS */
+.fkeys{
+    background:#ff00ff;
+    color:#000;
+    padding:4px;
+    margin:6px;
+    display:flex;
+    justify-content:space-between;
+    font-weight:bold;
+}
+</style>
+</head>
+
+<body>
+
+<!-- TOP -->
+<div class="block top">
+    <div class="logo">
+        <img src="альфабета_логотип.png">
+    </div>
+
+    <div class="slogan">
+        Назад в будущее, вперед в прошлое: СЕРВИС СТУДРАБОТ
+    </div>
+
+    <div></div>
+</div>
+
+<!-- MENU -->
+<div class="block menu">
+    LOAD "STUDWORK" : RUN ANALYSIS
+</div>
+
+<!-- INFO -->
+<div class="block info">
+    <div>ZX SPECTRUM MODE</div>
+    <div>ATTRIBUTE CLASH ENABLED</div>
+</div>
+
+<!-- MAIN -->
+<div class="main">
+
+    <div class="ruler">
+    10----20----30----40----50----60----70
+    </div>
+
+    <div class="text">
+ZX SPECTRUM SYSTEM LOADED
+COLOUR CLASH ACTIVE
+READY FOR INPUT
+
+<span class="cursor"></span>
+    </div>
+
+    <!-- POPUP -->
+    <div class="popup">
+        <div class="popup-title">MAIN MENU</div>
+
+        <div class="item active">1. Предоставить анализ проблемы (ядро исследования) - бесплатно</div>
+        <div class="item">2. Сформировать план курсовой работы - бесплатно</div>
+        <div class="item">3. Создать введение к курсовой работе (на основе плана)</div>
+        <div class="item">4. СОЗДАТЬ КУРСОВУЮ РАБОТУ</div>
+        <div class="item">5. Подобрать источники к курсовой работе</div>
+        <div class="item">6. Отформатировать курсовую работу по ГОСТ</div>
+        <div class="item">7. Проверить текст на ИИ (ИИ-детектор)</div>
+        <div class="item">8. Очеловечить работу (убрать ИИ-паттерны)</div>
+
+        <div class="hint">
+            PRESS ENTER / ESC
+        </div>
+    </div>
+
+</div>
+
+<!-- STATUS -->
+<div class="status">
+    <div>MEMORY OK</div>
+    <div>128K ZX EMULATION</div>
+</div>
+
+<!-- F KEYS -->
+<div class="fkeys">
+    <div>F1 HELP</div>
+    <div>F5 RUN</div>
+    <div>F10 STOP</div>
+</div>
+
+</body>
+</html>

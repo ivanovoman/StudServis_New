@@ -1,0 +1,205 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>STUDWORK SYSTEM - LISA UI</title>
+
+<style>
+*{
+    margin:0;
+    padding:0;
+    box-sizing:border-box;
+}
+
+body{
+    background:#ffffff;
+    font-family: "Chicago", "Courier New", monospace;
+    color:#000;
+}
+
+/* ===== MENU BAR (MAC STYLE) ===== */
+.menubar{
+    display:flex;
+    justify-content:space-between;
+    border-bottom:2px solid #000;
+    padding:4px 10px;
+    font-size:12px;
+}
+
+/* ===== DESKTOP ===== */
+.desktop{
+    position:relative;
+    height:calc(100vh - 30px);
+    padding:10px;
+}
+
+/* ===== WINDOW STYLE (LISA / MAC) ===== */
+.window{
+    position:absolute;
+    top:20px;
+    left:20px;
+    right:20px;
+    bottom:20px;
+    border:2px solid #000;
+    background:#fff;
+    display:flex;
+    flex-direction:column;
+}
+
+/* title bar */
+.titlebar{
+    border-bottom:2px solid #000;
+    padding:6px;
+    text-align:center;
+    font-weight:bold;
+}
+
+/* content */
+.content{
+    flex:1;
+    padding:10px;
+    position:relative;
+}
+
+/* ruler */
+.ruler{
+    border-bottom:1px solid #000;
+    margin-bottom:8px;
+    font-size:11px;
+}
+
+/* text */
+.text{
+    white-space:pre-wrap;
+    line-height:1.4;
+}
+
+/* cursor */
+.cursor{
+    display:inline-block;
+    width:8px;
+    height:14px;
+    background:#000;
+    animation:blink 1s infinite;
+}
+
+@keyframes blink{
+    50%{opacity:0;}
+}
+
+/* ===== NC STYLE POPUP (MAC DIALOG) ===== */
+.popup{
+    position:absolute;
+    top:50%;
+    left:50%;
+    transform:translate(-50%,-50%);
+    border:2px solid #000;
+    background:#fff;
+    width:520px;
+    padding:10px;
+}
+
+/* popup title */
+.popup-title{
+    text-align:center;
+    border-bottom:1px solid #000;
+    padding-bottom:6px;
+    margin-bottom:10px;
+    font-weight:bold;
+}
+
+/* items */
+.item{
+    padding:6px;
+    border:1px solid #000;
+    margin-bottom:4px;
+    cursor:pointer;
+}
+
+.item:hover,
+.item.active{
+    background:#000;
+    color:#fff;
+}
+
+/* hint */
+.hint{
+    margin-top:10px;
+    text-align:center;
+    font-size:11px;
+}
+
+/* ===== STATUS ===== */
+.statusbar{
+    border-top:2px solid #000;
+    padding:4px;
+    display:flex;
+    justify-content:space-between;
+    font-size:12px;
+}
+</style>
+</head>
+
+<body>
+
+<!-- MENU BAR -->
+<div class="menubar">
+    <div> File  Edit  View  Special</div>
+    <div>STUDWORK SYSTEM</div>
+</div>
+
+<!-- DESKTOP -->
+<div class="desktop">
+
+    <div class="window">
+
+        <div class="titlebar">
+            STUDWORK DOCUMENT
+        </div>
+
+        <div class="content">
+
+            <div class="ruler">
+            --------------------------------------------
+            </div>
+
+            <div class="text">
+APPLE LISA / MACINTOSH 1-BIT GUI SYSTEM
+DOCUMENT INTERFACE LOADED
+READY FOR OPERATIONS
+
+<span class="cursor"></span>
+            </div>
+
+            <!-- POPUP MENU -->
+            <div class="popup">
+                <div class="popup-title">MAIN MENU</div>
+
+                <div class="item active">1. Предоставить анализ проблемы (ядро исследования) - бесплатно</div>
+                <div class="item">2. Сформировать план курсовой работы - бесплатно</div>
+                <div class="item">3. Создать введение к курсовой работе (на основе плана)</div>
+                <div class="item">4. СОЗДАТЬ КУРСОВУЮ РАБОТУ</div>
+                <div class="item">5. Подобрать источники к курсовой работе</div>
+                <div class="item">6. Отформатировать курсовую работу по ГОСТ</div>
+                <div class="item">7. Проверить текст на ИИ (ИИ-детектор)</div>
+                <div class="item">8. Очеловечить работу (убрать ИИ-паттерны)</div>
+
+                <div class="hint">
+                    CLICK OR ENTER TO SELECT
+                </div>
+            </div>
+
+        </div>
+
+        <div class="statusbar">
+            <div>READY</div>
+            <div>LISA EMULATION MODE</div>
+        </div>
+
+    </div>
+
+</div>
+
+</body>
+</html>

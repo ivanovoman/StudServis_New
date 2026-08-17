@@ -1,0 +1,235 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>STUDWORK WINDOWS 3.1</title>
+
+<style>
+*{
+    margin:0;
+    padding:0;
+    box-sizing:border-box;
+}
+
+body{
+    background:#c0c0c0;
+    font-family:"MS Sans Serif", Tahoma, sans-serif;
+    color:#000;
+}
+
+/* ===== 3.1 STYLE 3D BORDER ===== */
+.inset{
+    border-top:2px solid #808080;
+    border-left:2px solid #808080;
+    border-right:2px solid #ffffff;
+    border-bottom:2px solid #ffffff;
+}
+
+.outset{
+    border-top:2px solid #ffffff;
+    border-left:2px solid #ffffff;
+    border-right:2px solid #808080;
+    border-bottom:2px solid #808080;
+}
+
+/* ===== TOP BAR ===== */
+.topbar{
+    background:#000080;
+    color:#ffffff;
+    padding:4px 8px;
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    font-weight:bold;
+}
+
+/* logo */
+.logo img{
+    height:40px;
+}
+
+/* ===== MAIN DESKTOP ===== */
+.desktop{
+    padding:8px;
+    display:grid;
+    grid-template-columns:1fr 1fr;
+    grid-template-rows:auto auto;
+    gap:6px;
+    height:calc(100vh - 40px);
+}
+
+/* ===== WINDOW ===== */
+.window{
+    background:#c0c0c0;
+    display:flex;
+    flex-direction:column;
+    min-height:200px;
+}
+
+.titlebar{
+    background:#000080;
+    color:#ffffff;
+    padding:3px 6px;
+    font-size:12px;
+    font-weight:bold;
+}
+
+.content{
+    padding:8px;
+}
+
+/* text */
+.text{
+    white-space:pre-wrap;
+    line-height:1.4;
+}
+
+/* cursor */
+.cursor{
+    display:inline-block;
+    width:8px;
+    height:14px;
+    background:#000;
+    animation:blink 1s infinite;
+}
+
+@keyframes blink{
+    50%{opacity:0;}
+}
+
+/* ===== BUTTON STYLE (WIN 3.1) ===== */
+.button{
+    background:#c0c0c0;
+    padding:4px 8px;
+    margin:3px 0;
+    cursor:pointer;
+}
+
+/* ===== POPUP ===== */
+.popup{
+    position:absolute;
+    top:50%;
+    left:50%;
+    transform:translate(-50%,-50%);
+    width:520px;
+    background:#c0c0c0;
+}
+
+.popup-header{
+    background:#000080;
+    color:#fff;
+    padding:4px;
+    text-align:center;
+    font-weight:bold;
+}
+
+.item{
+    padding:5px;
+    margin:3px;
+    background:#c0c0c0;
+}
+
+.item:hover,
+.item.active{
+    background:#000080;
+    color:#fff;
+}
+
+/* ===== STATUS BAR ===== */
+.status{
+    grid-column:1 / span 2;
+    background:#c0c0c0;
+    padding:4px;
+    display:flex;
+    justify-content:space-between;
+    font-size:12px;
+}
+
+/* ===== TASKBAR STYLE ===== */
+.taskbar{
+    position:fixed;
+    bottom:0;
+    left:0;
+    right:0;
+    background:#c0c0c0;
+    border-top:2px solid #ffffff;
+    padding:3px;
+    font-size:12px;
+}
+</style>
+</head>
+
+<body>
+
+<!-- TOP BAR -->
+<div class="topbar inset">
+    <div class="logo">
+        <img src="альфабета_логотип.png">
+    </div>
+
+    <div>
+        Назад в будущее, вперед в прошлое: СЕРВИС СТУДРАБОТ
+    </div>
+
+    <div>Windows 3.1</div>
+</div>
+
+<!-- DESKTOP -->
+<div class="desktop">
+
+    <div class="window outset">
+        <div class="titlebar">SYSTEM</div>
+        <div class="content">
+            <div class="text">
+WINDOWS 3.1 STYLE GUI
+CONTROL PANEL MODE
+READY
+
+<span class="cursor"></span>
+            </div>
+        </div>
+    </div>
+
+    <div class="window outset">
+        <div class="titlebar">DOCUMENT</div>
+        <div class="content">
+            STUDWORK SYSTEM ACTIVE
+        </div>
+    </div>
+
+    <div class="window outset" style="grid-column:1 / span 2;">
+        <div class="titlebar">MAIN MENU</div>
+        <div class="content">
+
+            <div class="popup inset">
+                <div class="popup-header">ГЛАВНОЕ МЕНЮ</div>
+
+                <div class="item active">1. Предоставить анализ проблемы (ядро исследования) - бесплатно</div>
+                <div class="item">2. Сформировать план курсовой работы - бесплатно</div>
+                <div class="item">3. Создать введение к курсовой работе (на основе плана)</div>
+                <div class="item">4. СОЗДАТЬ КУРСОВУЮ РАБОТУ</div>
+                <div class="item">5. Подобрать источники к курсовой работе</div>
+                <div class="item">6. Отформатировать курсовую работу по ГОСТ</div>
+                <div class="item">7. Проверить текст на ИИ (ИИ-детектор)</div>
+                <div class="item">8. Очеловечить работу (убрать ИИ-паттерны)</div>
+
+            </div>
+
+        </div>
+    </div>
+
+    <div class="status inset">
+        <div>READY</div>
+        <div>WINDOWS 3.1 MODE</div>
+    </div>
+
+</div>
+
+<!-- TASKBAR -->
+<div class="taskbar inset">
+    START | STUDWORK | SYSTEM READY
+</div>
+
+</body>
+</html>

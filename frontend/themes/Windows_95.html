@@ -1,0 +1,205 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>АЛЬФАБЕТА - СТУДРАБОТЫ</title>
+
+<style>
+body{
+    margin:0;
+    font-family: Tahoma, "MS Sans Serif", sans-serif;
+    background:#c0c0c0;
+    font-size:12px;
+}
+
+/* 3D WIN98 */
+.inset{
+    border-top:2px solid #808080;
+    border-left:2px solid #808080;
+    border-right:2px solid #ffffff;
+    border-bottom:2px solid #ffffff;
+}
+
+.outset{
+    border-top:2px solid #ffffff;
+    border-left:2px solid #ffffff;
+    border-right:2px solid #808080;
+    border-bottom:2px solid #808080;
+}
+
+/* TOP BAR */
+.topbar{
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    background:#c0c0c0;
+    padding:6px 10px;
+}
+
+/* LOGO FIXED */
+.logo img{
+    height:55px;
+    width:auto;
+    display:block;
+}
+
+/* CENTER TEXT */
+.slogan{
+    flex:1;
+    text-align:center;
+    font-weight:bold;
+    font-size:14px;
+    color:#000;
+}
+
+/* MENU */
+.menu{
+    background:#c0c0c0;
+    padding:4px 10px;
+    border-top:2px solid #ffffff;
+    border-bottom:2px solid #808080;
+    display:flex;
+    gap:15px;
+}
+
+/* MAIN */
+.main{
+    display:grid;
+    grid-template-columns:1fr 1fr;
+    gap:6px;
+    padding:6px;
+}
+
+/* PANELS */
+.panel{
+    background:#c0c0c0;
+    height:300px;
+    display:flex;
+    flex-direction:column;
+}
+
+.panel-header{
+    background:#000080;
+    color:white;
+    padding:3px;
+    font-weight:bold;
+}
+
+.panel-body{
+    flex:1;
+    padding:6px;
+}
+
+/* POPUP */
+.popup{
+    position:absolute;
+    top:50%;
+    left:50%;
+    transform:translate(-50%,-50%);
+    width:520px;
+    background:#c0c0c0;
+    padding:10px;
+}
+
+.popup-title{
+    background:#000080;
+    color:#fff;
+    text-align:center;
+    padding:4px;
+    font-weight:bold;
+}
+
+.item{
+    padding:5px;
+    margin:2px 0;
+}
+
+.item:hover,
+.item.active{
+    background:#000080;
+    color:#fff;
+}
+
+/* STATUS */
+.status{
+    position:fixed;
+    bottom:0;
+    left:0;
+    right:0;
+    background:#c0c0c0;
+    border-top:2px solid #fff;
+    padding:4px;
+    display:flex;
+    justify-content:space-between;
+}
+</style>
+</head>
+
+<body>
+
+<!-- TOP BAR -->
+<div class="topbar outset">
+
+    <div class="logo">
+        <img src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAABOYAAATmCAIAAAAKnjl9AABhWmNhQlgAAGFaanVtYgAAAB5qdW1kYzJwYQARABCAAACqADibcQNj...">
+    </div>
+
+    <div class="slogan">
+        Назад в будущее, вперед в прошлое: СЕРВИС СТУДРАБОТ
+    </div>
+
+    <div style="width:120px"></div>
+
+</div>
+
+<!-- MENU -->
+<div class="menu inset">
+    File | Edit | View | Tools | Help
+</div>
+
+<!-- MAIN -->
+<div class="main">
+
+    <div class="panel outset">
+        <div class="panel-header">SYSTEM</div>
+        <div class="panel-body">
+            Windows 95/98 style NC1 interface<br>
+            Ready...
+        </div>
+    </div>
+
+    <div class="panel outset">
+        <div class="panel-header">INFO</div>
+        <div class="panel-body">
+            AlphaBeta Service Panel<br>
+            Study Work System
+        </div>
+    </div>
+
+</div>
+
+<!-- POPUP -->
+<div class="popup outset">
+
+    <div class="popup-title">ГЛАВНОЕ МЕНЮ</div>
+
+    <div class="item active">1. Предоставить анализ проблемы (ядро исследования) - бесплатно</div>
+    <div class="item">2. Сформировать план курсовой работы - бесплатно</div>
+    <div class="item">3. Создать введение к курсовой работе (на основе плана)</div>
+    <div class="item">4. СОЗДАТЬ КУРСОВУЮ РАБОТУ</div>
+    <div class="item">5. Подобрать источники к курсовой работе</div>
+    <div class="item">6. Отформатировать курсовую работу по ГОСТ</div>
+    <div class="item">7. Проверить текст на ИИ (ИИ-детектор)</div>
+    <div class="item">8. Очеловечить работу (убрать ИИ-паттерны)</div>
+
+</div>
+
+<!-- STATUS -->
+<div class="status inset">
+    <div>READY</div>
+    <div>WINDOWS 98 / NC1 HYBRID MODE</div>
+</div>
+
+</body>
+</html>

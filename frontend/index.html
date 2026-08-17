@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>СЕРВИС СТУДРАБОТ</title>
+    <script src="themes.js"></script>
+    <style>
+        body { background: #0a0a0a; }
+    </style>
+</head>
+<body>
+    <script>
+        // ?theme=Windows_95.html — открыть конкретную тему (для отладки)
+        const params = new URLSearchParams(window.location.search);
+        const requested = params.get("theme");
+        const theme = THEMES.includes(requested)
+            ? requested
+            : THEMES[Math.floor(Math.random() * THEMES.length)];
+        window.location.replace("themes/" + theme);
+    </script>
+    <noscript>
+        <p style="color:#ffb000;font-family:monospace;">
+            Включите JavaScript или откройте тему напрямую из папки
+            <a href="themes/" style="color:#ffcc00;">themes/</a>.
+        </p>
+    </noscript>
+</body>
+</html>
