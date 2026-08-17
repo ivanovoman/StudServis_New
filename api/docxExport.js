@@ -286,6 +286,43 @@ function buildSectionBlocks(heading, text, tableData) {
   return blocks;
 }
 
+// Строка страницы СОДЕРЖАНИЕ: пункт оглавления без номера страницы
+// (номера проставляются в Word после финальной вёрстки). Разделы (1.1, 1.2)
+// выводятся с отступом относительно глав.
+function makeContentsLine(text, { indented = false } = {}) {
+  return new Paragraph({
+    children: [new TextRun({ text: fixDashes(String(text)), bold: false, size: BODY_SIZE, font: FONT })],
+    spacing: { before: 0, after: 0, line: 360 },
+    indent: indented ? { left: 720 } : undefined,
+  });
+}
+
+// Собирает страницу СОДЕРЖАНИЕ по структуре работы: ВВЕДЕНИЕ, главы с
+// разделами, ЗАКЛЮЧЕНИЕ.
+function buildContentsPage(sections, chapterTitles, sectionTitles) {
+  const blocks = [];
+  blocks.push(...makeH1('СОДЕРЖАНИЕ', { pageBreakBefore: false }));
+  blocks.push(makeContentsLine('ВВЕДЕНИЕ'));
+
+  let lastChapterNum = null;
+  for (const s of (sections || [])) {
+    const chapterNum = String(s.number || '').split('.')[0];
+    if (chapterNum && chapterNum !== lastChapterNum) {
+      const chapterName = chapterTitles && chapterTitles[chapterNum];
+      blocks.push(makeContentsLine(chapterName ? `ГЛАВА ${chapterNum}. ${chapterName}` : `ГЛАВА ${chapterNum}`));
+      lastChapterNum = chapterNum;
+    }
+    const sectionNum = s.number ? String(s.number) : null;
+    if (sectionNum) {
+      const sectionName = sectionTitles && sectionTitles[sectionNum];
+      blocks.push(makeContentsLine(sectionName ? `${sectionNum}. ${sectionName}` : sectionNum, { indented: true }));
+    }
+  }
+
+  blocks.push(makeContentsLine('ЗАКЛЮЧЕНИЕ'));
+  return blocks;
+}
+
 // ---- Документ целиком ----
 
 // Поля страницы по ГОСТ: верх 2см, низ 2см, слева 3см (переплёт), справа 1.5см.
@@ -384,8 +421,11 @@ async function generateFragmentDocx({
 async function generateFullDocx({ topic, introduction, sections, conclusion, chapterTitles, sectionTitles }) {
   const children = [];
 
-  // ВВЕДЕНИЕ — первый H1, без разрыва страницы перед собой (это начало документа)
-  children.push(...makeH1('ВВЕДЕНИЕ', { pageBreakBefore: false }));
+  // СОДЕРЖАНИЕ — первая страница документа
+  children.push(...buildContentsPage(sections, chapterTitles, sectionTitles));
+
+  // ВВЕДЕНИЕ — H1 с разрывом страницы после СОДЕРЖАНИЯ
+  children.push(...makeH1('ВВЕДЕНИЕ', { pageBreakBefore: true }));
   children.push(...makeBodyParagraphs(stripDuplicateHeading(introduction, 'Введение')));
 
   // Группируем разделы по номеру главы (всё до первой точки)
