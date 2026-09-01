@@ -14,3 +14,4 @@ venv/
 .pytest_cache/
 backend/storage/
 backend/.env
+uploads/
