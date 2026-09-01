@@ -12,21 +12,40 @@ app.use(express.static(path.join(__dirname, '..', 'public')));
 
 // Модель по умолчанию — бесплатная на OpenRouter.
 // ВАЖНО: список бесплатных моделей на OpenRouter меняется без предупреждения.
-// Если получаешь ошибку "model is unavailable for free" — зайди на
-// https://openrouter.ai/models?max_price=0, выбери любую модель с пометкой ":free"
-// и впиши её id в переменную OPENROUTER_MODEL (в .env локально, или в Vercel Settings).
-// nvidia/nemotron-3-super-120b-a12b:free подтверждена рабочей на практике (20.06.2026) —
-// поставлена первой, чтобы не терять время на заведомо недоступную kimi на каждом шаге.
-const MODEL = process.env.OPENROUTER_MODEL || 'nvidia/nemotron-3-super-120b-a12b:free';
+// Список ниже ПРОВЕРЕН вживую 01.09.2026 реальными запросами на русском языке.
+//
+// Порядок подобран по результатам теста (русский юридический текст, 250-300 слов):
+//   1. minimax/minimax-m3        — лучший баланс: русский 0.84-0.88, живой ритм
+//                                   (разброс длин предложений 12.3 — самый человечный),
+//                                   ссылки на нормы и практику, 4.4 с.
+//   2. minimax/minimax-m2.7      — тот же вендор, чуть медленнее (8.6 с), стабильный русский.
+//   3. nvidia/nemotron-3-ultra   — русский стабильный, много ссылок на нормы,
+//                                   но ритм ровнее (разброс 6.0) — текст суше.
+//   4. dots-studio/dots-3-note   — русский хороший, но склонен к клише и к тому,
+//                                   чтобы выдавать "Вариант 1 / Вариант 2" вместо текста.
+//   5. poolside/laguna-s-2.1     — качественный русский, но нестабильная доступность (2 из 3).
+//
+// ОСОЗНАННО ИСКЛЮЧЕНЫ (не добавлять обратно без повторной проверки):
+//   nvidia/nemotron-3-super-120b-a12b:free — БЫЛА ПЕРВОЙ В СПИСКЕ, но сейчас отдаёт
+//       404 от провайдера Nvidia, а когда отвечает — думает и пишет по-АНГЛИЙСКИ
+//       ("We need to produce 4 sentences...", доля кириллицы 0.10). Для русской курсовой непригодна.
+//   deepseek/deepseek-v4-flash:free  — такой модели на OpenRouter НЕ СУЩЕСТВУЕТ (id выдуман).
+//   moonshotai/kimi-k2.6:free        — такой модели на OpenRouter НЕ СУЩЕСТВУЕТ (id выдуман).
+//   google/gemma-4-31b-it:free       — существует, но стабильно отдаёт 429 (общий пул исчерпан).
+//   nvidia/nemotron-3.5-lightning / ling-3.0-flash-fin — отвечают англоязычным reasoning.
+//   nvidia/nemotron-3.5-content-safety — это модерационная модель, а не генеративная.
+//   cohere/north-mini-code — код-модель; на прозу даёт нестабильный результат.
+//
+// Проверить актуальность списка: node scripts/check-models.js
+const MODEL = process.env.OPENROUTER_MODEL || 'minimax/minimax-m3:free';
 
-// Если основная модель вдруг станет недоступна, сервер автоматически
-// попробует эти по очереди — чтобы сервис не падал из-за того, что
-// провайдер снял одну конкретную бесплатную модель.
+// Если основная модель недоступна, сервер перебирает эти по очереди.
 const FALLBACK_MODELS = [
-  'nvidia/nemotron-3-super-120b-a12b:free',
-  'deepseek/deepseek-v4-flash:free',
-  'google/gemma-4-31b-it:free',
-  'moonshotai/kimi-k2.6:free',
+  'minimax/minimax-m3:free',
+  'minimax/minimax-m2.7:free',
+  'nvidia/nemotron-3-ultra-550b-a55b:free',
+  'dots-studio/dots-3-note-preview:free',
+  'poolside/laguna-s-2.1:free',
 ];
 
 const OPENROUTER_URL = 'https://openrouter.ai/api/v1/chat/completions';
