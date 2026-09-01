@@ -1,0 +1,37 @@
+# --- Core & API ---
+fastapi==0.115.6
+uvicorn[standard]==0.34.0
+pydantic==2.10.4
+pydantic-settings==2.7.0
+python-multipart==0.0.20
+PyYAML==6.0.2
+
+# --- HTTP клиент (OpenRouter, парсеры источников) ---
+httpx==0.28.1
+
+# --- База данных ---
+sqlalchemy[asyncio]==2.0.36
+asyncpg==0.30.0
+alembic==1.14.0
+
+# --- Vector DB (RAG) ---
+qdrant-client==1.12.2
+sentence-transformers==3.3.1
+
+# --- Очередь задач ---
+celery==5.4.0
+redis==5.2.1
+
+# --- Документы (ГОСТ) ---
+python-docx==1.1.2
+
+# --- Безопасность ---
+passlib[bcrypt]==1.7.4
+python-jose[cryptography]==3.3.0
+
+# --- Платежи ---
+yookassa==3.5.0
+
+# --- Тесты ---
+pytest==8.3.4
+pytest-asyncio==0.25.0
