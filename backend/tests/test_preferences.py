@@ -281,3 +281,54 @@ class TestVisualsFalsePositives:
         body = make_text(5200) + "\n\n| Показатель | Значение |\n|---|---|\n"
         assert any(v.rule == "empty_table"
                    for v in check_section(body).violations)
+
+
+class TestLiveliness:
+    """Живость уместна и в научном тексте (правка заказчика).
+
+    Замеры: доля коротких предложений в диссертациях автора 14%
+    (медиана), в статьях 31%. Живость там уже есть, вопрос дозировки.
+    """
+
+    def test_default_is_normal(self):
+        assert WorkPreferences().liveliness == "normal"
+
+    def test_thresholds_match_author(self):
+        from app.modules.ai_engine.acceptance import (
+            MIN_SHORT_SENTENCE_SHARE,
+            TARGET_SHORT_SENTENCE_SHARE,
+        )
+        # p25 и медиана по 30 разделам автора.
+        assert MIN_SHORT_SENTENCE_SHARE == pytest.approx(0.08, abs=0.01)
+        assert TARGET_SHORT_SENTENCE_SHARE == pytest.approx(0.14, abs=0.01)
+        assert MIN_SHORT_SENTENCE_SHARE < TARGET_SHORT_SENTENCE_SHARE
+
+    def _monotone(self) -> str:
+        """Текст без единого короткого предложения."""
+        return " ".join(
+            "Данное обстоятельство имеет существенное значение для "
+            f"правоприменительной практики в рассматриваемом случае номер {i}."
+            for i in range(30)
+        )
+
+    def test_dead_text_flagged(self):
+        r = check_style(self._monotone())
+        assert any(v.rule == "short_sentences" for v in r.violations)
+
+    def test_high_liveliness_makes_it_an_error(self):
+        p = WorkPreferences(liveliness="high")
+        r = check_style(self._monotone(), prefs=p)
+        assert not r.passed
+        assert any(v.rule == "short_sentences" and v.severity == "error"
+                   for v in r.violations)
+
+    def test_high_liveliness_nudges_toward_target(self):
+        """Текст живой, но ниже медианы автора — подсказка, не брак."""
+        text = make_text(5200)
+        p = WorkPreferences(liveliness="high")
+        r = check_style(text, prefs=p)
+        assert r.passed or all(v.severity == "warning" for v in r.violations)
+
+    def test_summary_mentions_liveliness(self):
+        assert "живость" in WorkPreferences().summary().lower()
+        assert "повышенная" in WorkPreferences(liveliness="high").summary().lower()

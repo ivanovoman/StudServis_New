@@ -34,6 +34,7 @@ class PreferencesIn(BaseModel):
     charts: Requirement = Requirement.when_relevant
     forbid_empty_visuals: bool = True
     law_proposals: Requirement = Requirement.when_relevant
+    liveliness: str = "normal"
     cliche_policy: str = "author_level"
 
 
@@ -96,6 +97,16 @@ def preferences_schema() -> dict:
                 "type": "requirement",
                 "hint": "В юридической работе желательны, но должны быть "
                         "обоснованы",
+            },
+            {
+                "name": "liveliness", "label": "Живость изложения",
+                "type": "select",
+                "options": [
+                    {"value": "normal", "label": "Обычная для науки"},
+                    {"value": "high", "label": "Повышенная (легче читается)"},
+                ],
+                "hint": "Живость уместна и в научной работе: у автора "
+                        "каждое седьмое предложение короткое",
             },
             {
                 "name": "cliche_policy", "label": "Отношение к клише",

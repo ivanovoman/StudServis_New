@@ -93,9 +93,19 @@ MIN_SENTENCE_STDEV = 8.7                              # p10 разделов а�
 # выше медианы — повод почистить, но не повод останавливать конвейер.
 MAX_CLICHE_PER_1K = 3.5
 WARN_CLICHE_PER_1K = 2.5
-# Доля коротких предложений: у автора по разделам сильно плавает,
-# поэтому это предупреждение, а не брак (у ИИ было ровно 0.0).
-MIN_SHORT_SENTENCE_SHARE = 0.05
+# Доля коротких предложений — мера «живости».
+#
+# Заказчик: живость допустима и в научной работе, так текст легче
+# воспринимается. Замеры это подтверждают: по 30 разделам его
+# диссертаций медиана доли коротких предложений 0.143, то есть
+# примерно каждое седьмое предложение короткое. Живость там уже есть,
+# её просто меньше, чем в статьях (0.306).
+#
+# Отсюда два уровня, а не один:
+#   MIN — ниже этого текст мёртвый (p25 автора);
+#   TARGET — к чему стремимся при генерации (медиана автора).
+MIN_SHORT_SENTENCE_SHARE = 0.08          # p25 разделов автора
+TARGET_SHORT_SENTENCE_SHARE = 0.14       # медиана разделов автора
 MAX_SENTENCE_LEN_MEAN = 26.0
 
 
@@ -119,8 +129,18 @@ def check_style(text: str, *, strict_rhythm: bool = True,
     if p.short_sentence_share < MIN_SHORT_SENTENCE_SHARE:
         res.add(
             "short_sentences",
-            f"коротких предложений {p.short_sentence_share:.0%} "
-            f"при норме >= {MIN_SHORT_SENTENCE_SHARE:.0%}",
+            f"текст «мёртвый»: коротких предложений "
+            f"{p.short_sentence_share:.0%}, минимум {MIN_SHORT_SENTENCE_SHARE:.0%}, "
+            f"ориентир {TARGET_SHORT_SENTENCE_SHARE:.0%} (медиана автора). "
+            "Живость уместна и в научном тексте — так он легче читается",
+            severity="warning" if prefs.liveliness != "high" else "error",
+        )
+    elif (prefs.liveliness == "high"
+          and p.short_sentence_share < TARGET_SHORT_SENTENCE_SHARE):
+        res.add(
+            "short_sentences",
+            f"коротких предложений {p.short_sentence_share:.0%}, "
+            f"ориентир {TARGET_SHORT_SENTENCE_SHARE:.0%} — можно добавить живости",
             severity="warning",
         )
     max_cliche = (0.5 if prefs.cliche_policy == "strict" else MAX_CLICHE_PER_1K)
