@@ -43,6 +43,10 @@ from typing import Any
 from app.modules.sources.openalex import Source, find_sources_for_topic
 
 MAX_ABSTRACT_IN_PROMPT = 1200
+
+#: Полного текста берём больше, чем аннотации, но не весь: шесть статей
+#: целиком не поместятся в контекст free-модели.
+MAX_FULLTEXT_IN_PROMPT = 3500
 MIN_SOURCES_FOR_GROUNDING = 2
 
 
@@ -86,18 +90,26 @@ GROUNDED_SYSTEM_PROMPT = """Ты — научный руководитель, к
 
 
 def format_sources_for_prompt(sources: list[Source]) -> str:
-    """Готовит блок источников для промпта."""
+    """Готовит блок источников для промпта.
+
+    Где есть полный текст (КиберЛенинка), в промпт идёт его начало —
+    там обычно постановка проблемы и обзор позиций, то есть самое
+    полезное для разбора темы. Где текста нет — аннотация.
+    """
     lines = []
     for i, s in enumerate(sources, 1):
-        abstract = s.abstract
-        if len(abstract) > MAX_ABSTRACT_IN_PROMPT:
-            abstract = abstract[:MAX_ABSTRACT_IN_PROMPT].rsplit(" ", 1)[0] + "…"
+        body = s.content
+        limit = (MAX_FULLTEXT_IN_PROMPT if s.fulltext
+                 else MAX_ABSTRACT_IN_PROMPT)
+        if len(body) > limit:
+            body = body[:limit].rsplit(" ", 1)[0] + "…"
+        label = "Фрагмент статьи" if s.fulltext else "Аннотация"
         who = ", ".join(s.authors[:2]) if s.authors else "автор не указан"
         lines.append(
             f"[{i}] {s.title}\n"
             f"    {who}, {s.year or 'год не указан'}"
             + (f", {s.venue}" if s.venue else "")
-            + f"\n    Аннотация: {abstract}"
+            + f"\n    {label}: {body}"
         )
     return "\n\n".join(lines)
 
@@ -288,9 +300,10 @@ async def analyze_topic_grounded(
         draft, _ = await analyze_topic(topic, prefs=prefs, router=router)
         directions = draft.search_directions[:4] or [topic]
 
-    # Шаг 2: реальные источники.
+    # Шаг 2: реальные источники из всех доступных баз.
     if sources is None:
-        sources = find_sources_for_topic(directions, topic=topic, limit=6)
+        from app.modules.sources.registry import find_sources
+        sources = await find_sources(topic, directions, limit=6)
 
     if len(sources) < MIN_SOURCES_FOR_GROUNDING:
         return (

@@ -49,19 +49,28 @@ class Source:
     """Научная публикация, пригодная для цитирования."""
 
     title: str
-    year: int | None
-    doi: str
-    abstract: str
-    url: str
+    year: int | None = None
+    doi: str | None = ""
+    abstract: str = ""
+    url: str = ""
     authors: list[str] = field(default_factory=list)
-    venue: str = ""
+    venue: str | None = ""
     cited_by: int = 0
     is_oa: bool = False
     language: str = ""
+    #: Откуда пришла запись: openalex или cyberleninka.
+    provider: str = "openalex"
+    #: Полный текст статьи, если база его отдаёт (КиберЛенинка).
+    fulltext: str = ""
 
     @property
     def has_usable_abstract(self) -> bool:
-        return len(self.abstract) >= MIN_ABSTRACT_CHARS
+        return len(self.abstract) >= MIN_ABSTRACT_CHARS or bool(self.fulltext)
+
+    @property
+    def content(self) -> str:
+        """Текст для промпта: полный, если он есть, иначе абстракт."""
+        return self.fulltext or self.abstract
 
     @property
     def is_russian(self) -> bool:
@@ -94,6 +103,7 @@ class Source:
             "abstract": self.abstract, "url": self.url,
             "authors": self.authors, "venue": self.venue,
             "cited_by": self.cited_by, "is_oa": self.is_oa,
+            "provider": self.provider,
             "language": self.language,
         }
 
@@ -112,7 +122,7 @@ def restore_abstract(inverted: dict[str, list[int]] | None) -> str:
     return re.sub(r"\s+", " ", text).strip()
 
 
-def _normalize_title(title: str) -> str:
+def normalize_title(title: str) -> str:
     return re.sub(r"\W+", " ", (title or "").lower()).strip()
 
 
@@ -156,7 +166,7 @@ def deduplicate(sources: Iterable[Source]) -> list[Source]:
     out: list[Source] = []
     for s in sources:
         doi = (s.doi or "").lower()
-        title = _normalize_title(s.title)
+        title = normalize_title(s.title)
         if doi and doi in seen_doi:
             continue
         if title and title in seen_title:
@@ -236,7 +246,7 @@ def relevance(source: Source, topic: str) -> float:
     if not topic_words:
         return 0.0
     # Совпадение по началу слова: «ответственность» ~ «ответственности».
-    haystack = _significant_words(f"{source.title} {source.abstract}")
+    haystack = _significant_words(f"{source.title} {source.content}")
     hits = 0
     for tw in topic_words:
         stem = tw[:6]
