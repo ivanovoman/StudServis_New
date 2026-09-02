@@ -122,6 +122,11 @@ async def find_sources(
 
     top = rank(pool, topic)[:limit]
 
+    # Сохраняем оценку: дальше её читает check_grounding, а показать её
+    # пользователю честнее, чем прятать.
+    for source in top:
+        source.relevance = round(relevance(source, topic), 2)
+
     if with_fulltext:
         top = await cyberleninka.enrich_with_fulltext(
             top, limit=FULLTEXT_LIMIT)

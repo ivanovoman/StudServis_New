@@ -220,6 +220,15 @@ def parse_grounded(raw: str, sources: list[Source]) -> GroundedAnalysis:
     )
 
 
+#: Ниже этого источник считается притянутым: он совпал с темой только
+#: общеотраслевыми словами.
+MIN_USABLE_RELEVANCE = 0.35
+
+#: Сколько по-настоящему релевантных источников нужно, чтобы разбор
+#: темы считался обоснованным.
+MIN_RELEVANT_SOURCES = 2
+
+
 def check_grounding(a: GroundedAnalysis, *,
                     min_grounded_share: float = 0.5) -> list[str]:
     """Проверяет, что анализ действительно опирается на источники."""
@@ -229,6 +238,19 @@ def check_grounding(a: GroundedAnalysis, *,
         problems.append(
             f"источников найдено {len(a.sources)}, "
             f"нужно минимум {MIN_SOURCES_FOR_GROUNDING}"
+        )
+
+    # Одного количества мало. По узкой теме поиск возвращает шесть
+    # статей, совпавших с темой только словами «правовое регулирование»,
+    # и без этой проверки анализ выглядел бы обоснованным.
+    weak = [s for s in a.sources if s.relevance < MIN_USABLE_RELEVANCE]
+    strong = len(a.sources) - len(weak)
+    if a.sources and strong < MIN_RELEVANT_SOURCES:
+        problems.append(
+            f"по теме нашлось всего {strong} действительно релевантных "
+            f"источников из {len(a.sources)} — остальные совпали лишь "
+            f"общими словами; тема слишком узкая для научного поиска, "
+            f"нужна переформулировка или ручной подбор литературы"
         )
 
     if a.theses and a.grounded_share < min_grounded_share:

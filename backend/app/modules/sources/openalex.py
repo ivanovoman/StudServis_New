@@ -58,6 +58,8 @@ class Source:
     cited_by: int = 0
     is_oa: bool = False
     language: str = ""
+    #: Насколько статья отвечает теме. Проставляется при отборе.
+    relevance: float = 0.0
     #: Откуда пришла запись: openalex или cyberleninka.
     provider: str = "openalex"
     #: Полный текст статьи, если база его отдаёт (КиберЛенинка).
@@ -104,6 +106,7 @@ class Source:
             "authors": self.authors, "venue": self.venue,
             "cited_by": self.cited_by, "is_oa": self.is_oa,
             "provider": self.provider,
+            "relevance": round(self.relevance, 2),
             "language": self.language,
         }
 
@@ -234,25 +237,80 @@ def _significant_words(text: str) -> set[str]:
     return {w for w in words if w not in _STOP}
 
 
-def relevance(source: Source, topic: str) -> float:
-    """Доля значимых слов темы, встретившихся в заголовке или абстракте.
+#: Слова, которые встречаются едва ли не в каждой научной статье по
+#: праву или экономике. Совпадение по ним ничего не говорит о теме:
+#: выдуманная тема про дрифт-соревнования набрала 0.33 исключительно
+#: на «правовое регулирование» и прошла порог, притащив в анализ
+#: коллизионное право и таможенное законодательство.
+GENERIC_WORDS = {
+    "правовой", "правовые", "правовое", "правового", "правовая",
+    "право", "права", "прав", "правом", "регулирование", "регулирования",
+    "проблема", "проблемы", "проблем", "вопрос", "вопросы", "вопросов",
+    "анализ", "análisis", "аспекты", "аспект", "особенности", "понятие",
+    "сущность", "развитие", "система", "системы", "современный",
+    "современные", "российской", "российского", "россии", "федерации",
+    "государственный", "государственного", "деятельность", "механизм",
+    "совершенствование", "значение", "роль", "основы", "основные",
+    "порядок", "применение", "реализация", "обеспечение", "институт",
+    "законодательство", "законодательства", "нормы", "норм",
+    "экономический", "экономические", "управление", "организация",
+    "формирование", "оценка", "методы", "условия", "факторы",
+    "study", "analysis", "problem", "problems", "legal", "research",
+    "development", "system", "modern", "russian", "issues",
+}
 
-    Без этого фильтра выдача забивается свежими статьями из того же
-    журнала: на запрос про субсидиарную ответственность приходили
-    работы про ИИ в госуправлении и закупки — они были 2026 года, и
-    свежесть перевешивала всё остальное.
+#: Насколько слабее считается совпадение по общеупотребительному слову.
+GENERIC_WEIGHT = 0.2
+
+
+def _word_weight(word: str) -> float:
+    """Вес слова темы: общеюридические слова почти ничего не значат."""
+    return GENERIC_WEIGHT if word in GENERIC_WORDS else 1.0
+
+
+def relevance(source: Source, topic: str) -> float:
+    """Взвешенная доля слов темы, встретившихся в статье.
+
+    Простая доля совпавших слов не работает: у темы «правовое
+    регулирование дрифт-соревнований» два слова из четырёх — дежурные
+    для всей отрасли, и любая юридическая статья набирает по ним
+    проходной балл. Поэтому слова из GENERIC_WORDS считаются с малым
+    весом, а решают редкие, собственно тематические слова.
+
+    Без этого выдача по узкой теме забивалась случайными статьями,
+    а check_grounding не видел проблемы.
     """
     topic_words = _significant_words(topic)
     if not topic_words:
         return 0.0
+
+    total = sum(_word_weight(w) for w in topic_words)
+    if total <= 0:
+        return 0.0
+
     # Совпадение по началу слова: «ответственность» ~ «ответственности».
     haystack = _significant_words(f"{source.title} {source.content}")
-    hits = 0
+    hits = 0.0
     for tw in topic_words:
         stem = tw[:6]
         if any(hw.startswith(stem) for hw in haystack):
-            hits += 1
-    return hits / len(topic_words)
+            hits += _word_weight(tw)
+    return hits / total
+
+
+def specific_hit_ratio(source: Source, topic: str) -> float:
+    """Доля именно тематических (не дежурных) слов темы в статье.
+
+    Отдельная метрика для диагностики: показывает, попала ли статья в
+    суть темы или только в общеотраслевую лексику.
+    """
+    words = {w for w in _significant_words(topic) if w not in GENERIC_WORDS}
+    if not words:
+        return 1.0
+    haystack = _significant_words(f"{source.title} {source.content}")
+    hits = sum(1 for w in words
+               if any(h.startswith(w[:6]) for h in haystack))
+    return hits / len(words)
 
 
 def filter_relevant(sources: Iterable[Source], topic: str, *,

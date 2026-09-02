@@ -32,9 +32,11 @@ from app.modules.sources.openalex import (
 TOPIC = "Субсидиарная ответственность контролирующих должника лиц"
 
 
-def src(title, year=2025, doi="10.1/x", abstract="а" * 200, **kw):
+def src(title, year=2025, doi="10.1/x", abstract="а" * 200,
+        relevance=1.0, **kw):
+    """Источник для тестов. По умолчанию считается релевантным."""
     return Source(title=title, year=year, doi=doi, abstract=abstract,
-                  url="https://example.org", **kw)
+                  url="https://example.org", relevance=relevance, **kw)
 
 
 class TestRestoreAbstract:
@@ -545,3 +547,66 @@ class TestFulltextInPrompt:
         from app.modules.sources.grounding import format_sources_for_prompt
         out = format_sources_for_prompt([src("Статья", doi="10/1")])
         assert "Аннотация" in out
+
+
+class TestGenericWordTrap:
+    """Узкая тема не должна набирать источники дежурными словами.
+
+    Реальный случай: «Правовое регулирование дрифт-соревнований на
+    закрытых площадках». Поиск вернул шесть статей — про коллизионное
+    право, таможню и северные гарантии. Все набрали ровно 0.33 на
+    словах «правовое регулирование», прошли порог 0.3, и проверка
+    обоснованности не увидела проблемы.
+    """
+
+    TOPIC = "Правовое регулирование дрифт-соревнований на закрытых площадках"
+
+    def test_generic_match_scores_low(self):
+        from app.modules.sources.openalex import relevance
+        s = src("ПРАВОВОЕ РЕГУЛИРОВАНИЕ ЦИФРОВОЙ ИДЕНТИФИКАЦИИ", abstract="")
+        assert relevance(s, self.TOPIC) < 0.2
+
+    def test_on_topic_match_scores_high(self):
+        from app.modules.sources.openalex import relevance
+        s = src("Правовые аспекты организации дрифт-соревнований "
+                "на закрытых площадках", abstract="")
+        assert relevance(s, self.TOPIC) > 0.8
+
+    def test_specific_ratio_ignores_generic(self):
+        from app.modules.sources.openalex import specific_hit_ratio
+        generic = src("ПРАВОВОЕ РЕГУЛИРОВАНИЕ ТАМОЖНИ", abstract="")
+        assert specific_hit_ratio(generic, self.TOPIC) == 0.0
+
+    def test_relevant_topic_unaffected(self):
+        from app.modules.sources.openalex import relevance
+        topic = "Субсидиарная ответственность контролирующих должника лиц"
+        s = src("Внебанкротная субсидиарная ответственность "
+                "контролирующих лиц", abstract="")
+        assert relevance(s, topic) > 0.6
+
+    def test_check_reports_thin_coverage(self):
+        from app.modules.sources.grounding import (
+            GroundedAnalysis, GroundedThesis, check_grounding)
+        weak = [src(f"Статья {i}", doi=f"10/{i}", relevance=0.09)
+                for i in range(6)]
+        a = GroundedAnalysis(
+            core="ядро",
+            theses=[GroundedThesis(text="т", source_index=1)],
+            gaps=["пробел"],
+            sources=weak,
+        )
+        problems = check_grounding(a)
+        assert any("релевантных" in p for p in problems)
+
+    def test_check_passes_with_strong_sources(self):
+        from app.modules.sources.grounding import (
+            GroundedAnalysis, GroundedThesis, check_grounding)
+        strong = [src(f"Статья {i}", doi=f"10/{i}", relevance=0.9)
+                  for i in range(3)]
+        a = GroundedAnalysis(
+            core="ядро",
+            theses=[GroundedThesis(text="т", source_index=1)],
+            gaps=["пробел"],
+            sources=strong,
+        )
+        assert not any("релевантных" in p for p in check_grounding(a))
