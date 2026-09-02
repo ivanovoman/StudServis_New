@@ -17,6 +17,11 @@ router = APIRouter(prefix="/ai", tags=["ai"])
 class AnalyzeTopicIn(BaseModel):
     topic: str = Field(min_length=5, max_length=500)
     preferences: dict = Field(default_factory=dict)
+    with_sources: bool = True
+    """Искать реальные публикации и строить анализ на них.
+
+    Выключать стоит только когда нужен быстрый черновик: без
+    источников модель рассуждает по памяти."""
 
 
 @router.post("/analyze-topic")
@@ -54,4 +59,36 @@ async def analyze_topic_endpoint(payload: AnalyzeTopicIn) -> dict:
                 for i in check.issues
             ],
         },
+    }
+
+
+@router.post("/analyze-topic/grounded")
+async def analyze_topic_grounded_endpoint(payload: AnalyzeTopicIn) -> dict:
+    """Анализ темы с опорой на реальные публикации последних лет.
+
+    Сначала находит Open Access работы через OpenAlex, затем разбирает
+    тему по их абстрактам. Каждый тезис привязан к источнику с DOI.
+    """
+    from app.modules.sources.grounding import analyze_topic_grounded
+
+    try:
+        prefs = WorkPreferences.from_dict(payload.preferences)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    try:
+        analysis, problems = await analyze_topic_grounded(
+            payload.topic, prefs=prefs)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=502,
+            detail=f"модель вернула некорректный ответ: {exc}") from exc
+    except Exception as exc:
+        raise HTTPException(
+            status_code=502, detail=f"все модели недоступны: {exc}") from exc
+
+    return {
+        "analysis": analysis.to_dict(),
+        "problems": problems,
+        "grounded": len(analysis.sources) >= 2 and analysis.grounded_share >= 0.5,
     }
