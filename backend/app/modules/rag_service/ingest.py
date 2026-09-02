@@ -331,9 +331,19 @@ def chunk_style_articles(text: str, *, source: str = "стиль_коколов.
 
 # ------------------------------------------ диссертация (структура/эталон)
 
-RE_CHAPTER = re.compile(r"^ГЛАВА\s+(\d+)\.\s*(.+)$")
-RE_SECTION = re.compile(r"^(\d+\.\d+)\.\s*(.+)$")
-RE_CONCLUSIONS = re.compile(r"^Выводы по главе\s+(\d+)")
+# Регистр заголовков у разных работ разный: в одной диссертации
+# «ГЛАВА 1» и «ЗАКЛЮЧЕНИЕ» капсом, в другой — «Глава 2» и «Заключение»
+# строчными. Поэтому везде re.I, иначе половина структуры теряется.
+RE_CHAPTER = re.compile(r"^ГЛАВА\s+(\d+)[.\s]\s*(.*)$", re.I)
+RE_SECTION = re.compile(r"^(\d+\.\d+)\.?\s+(.+)$")
+# «Выводы по главе 1» и «Выводы по 1 главе» — обе формулировки встречаются.
+RE_CONCLUSIONS = re.compile(
+    r"^Выводы\s+по\s+(?:главе\s+(\d+)|(\d+)\s+главе)", re.I
+)
+RE_INTRO = re.compile(r"^ВВЕДЕНИЕ\s*$", re.I)
+RE_CONCLUSION = re.compile(r"^ЗАКЛЮЧЕНИЕ\s*$", re.I)
+RE_BIBLIO = re.compile(r"^(?:СПИСОК\s+(?:ИСПОЛЬЗОВАННЫХ\s+)?(?:ИСТОЧНИКОВ|ЛИТЕРАТУРЫ))", re.I)
+RE_APPENDIX = re.compile(r"^ПРИЛОЖЕНИ[ЕЯ]", re.I)
 
 
 def _strip_toc(pages: list[str]) -> list[str]:
@@ -369,21 +379,25 @@ def chunk_thesis(
         s = line.strip()
         kind = title = None
 
-        if s.startswith("ВВЕДЕНИЕ"):
+        # Порядок важен: «Выводы по главе» проверяем ДО «ГЛАВА»,
+        # иначе выводы съедаются правилом главы.
+        if m := RE_CONCLUSIONS.match(s):
+            kind, title = "chapter_conclusions", s
+            meta = {"chapter": m.group(1) or m.group(2)}
+        elif RE_INTRO.match(s):
             kind, title, meta = "introduction", "ВВЕДЕНИЕ", {}
-        elif s.startswith("ЗАКЛЮЧЕНИЕ"):
+        elif RE_CONCLUSION.match(s):
             kind, title, meta = "conclusion", "ЗАКЛЮЧЕНИЕ", {}
-        elif s.startswith("СПИСОК ИСПОЛЬЗОВАННЫХ"):
+        elif RE_BIBLIO.match(s):
             kind, title, meta = "bibliography", "СПИСОК ИСТОЧНИКОВ", {}
+        elif RE_APPENDIX.match(s):
+            kind, title, meta = "appendix", s, {}
         elif m := RE_CHAPTER.match(s):
             kind, title = "chapter", s
             meta = {"chapter": m.group(1)}
         elif m := RE_SECTION.match(s):
             kind, title = "section", s
             meta = {"number": m.group(1)}
-        elif m := RE_CONCLUSIONS.match(s):
-            kind, title = "chapter_conclusions", s
-            meta = {"chapter": m.group(1)}
 
         if kind:
             if buf:
@@ -402,7 +416,8 @@ def chunk_thesis(
 
     for kind, title, body in blocks:
         body = _collapse(body.strip())
-        if kind in ("preamble", "bibliography") or len(body) < 300:
+        # preamble — титул и оглавление, bibliography/appendix — не проза.
+        if kind in ("preamble", "bibliography", "appendix") or len(body) < 300:
             continue
 
         collection: Collection = (

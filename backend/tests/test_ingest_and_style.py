@@ -214,3 +214,51 @@ class TestCompare:
         )
         p = analyze_style([text])
         assert compare(p, p)["passed"]
+
+
+class TestHeadingCaseInsensitivity:
+    """Регистр заголовков у разных работ разный.
+
+    Диссертация 2026: «ГЛАВА 1», «ЗАКЛЮЧЕНИЕ», «Выводы по главе 1».
+    Диссертация 2002: «Глава 2», «Заключение», «Выводы по 1 главе».
+    Парсер должен понимать оба варианта, иначе теряются целые разделы:
+    на файле 2002 года при чувствительности к регистру пропадали
+    заключение и все выводы по главам.
+    """
+
+    def _thesis(self, chapter_line, conclusion_line, vyvody_line):
+        filler = "Содержательный текст раздела со ссылкой на норму. " * 20
+        return [
+            f"ВВЕДЕНИЕ\n\n{filler}",
+            f"{chapter_line}\n\n1.1. Понятие\n\n{filler}",
+            f"{vyvody_line}\n\n{filler}",
+            f"{conclusion_line}\n\n{filler}",
+        ]
+
+    def test_uppercase_variant(self):
+        pages = self._thesis("ГЛАВА 1. ОСНОВЫ", "ЗАКЛЮЧЕНИЕ", "Выводы по главе 1")
+        kinds = {c.metadata["section_type"] for c in chunk_thesis(pages)}
+        assert {"introduction", "conclusion", "chapter_conclusions"} <= kinds
+
+    def test_titlecase_variant_2002_style(self):
+        pages = self._thesis("Глава 2. Проблемы", "Заключение", "Выводы по 1 главе")
+        kinds = {c.metadata["section_type"] for c in chunk_thesis(pages)}
+        assert "conclusion" in kinds, "«Заключение» строчными должно распознаваться"
+        assert "chapter_conclusions" in kinds, "«Выводы по 1 главе» — тоже"
+
+    def test_conclusions_not_swallowed_by_chapter_rule(self):
+        """«Выводы по главе» проверяются ДО «ГЛАВА», иначе съедаются."""
+        pages = self._thesis("ГЛАВА 1. ОСНОВЫ", "ЗАКЛЮЧЕНИЕ", "Выводы по главе 1")
+        types = [c.metadata["section_type"] for c in chunk_thesis(pages)]
+        assert "chapter_conclusions" in types
+
+    def test_bibliography_and_appendix_excluded(self):
+        filler = "Текст раздела для проверки объема чанка. " * 20
+        pages = [
+            f"ВВЕДЕНИЕ\n\n{filler}",
+            f"Список литературы\n\n{filler}",
+            f"Приложение 1\n\n{filler}",
+        ]
+        kinds = {c.metadata["section_type"] for c in chunk_thesis(pages)}
+        assert "bibliography" not in kinds
+        assert "appendix" not in kinds
