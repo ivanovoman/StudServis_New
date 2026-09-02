@@ -7,11 +7,51 @@
 (function () {
   'use strict';
 
-  // step id бэкенда для каждого пункта меню (null — ещё не реализован)
+  // step id бэкенда для каждого пункта меню (null — ещё не реализован).
+  //
+  // needsSettings — нужны ли пункту настройки работы. Их требуют шаги,
+  // которые пишут текст: им важны тема, вуз, методичка, объёмы и
+  // источники. Проверка готового текста настроек не требует — там
+  // пользователь просто вставляет свой текст, и спрашивать про
+  // методичку было бы навязчиво.
   var MENU_STEPS = {
-    1: { step: 'analysis', title: 'АНАЛИЗ ПРОБЛЕМЫ', placeholder: 'Введите тему курсовой работы…', docTitle: 'Анализ проблемы' },
-    2: null, 3: null, 4: null, 5: null, 6: null, 7: null, 8: null,
+    1: { step: 'analysis', title: 'АНАЛИЗ ПРОБЛЕМЫ', docTitle: 'Анализ проблемы',
+         placeholder: 'Тема берётся из настроек. Здесь можно уточнить акцент…',
+         needsSettings: true },
+    2: { step: 'plan', title: 'ПЛАН РАБОТЫ', docTitle: 'План работы',
+         placeholder: 'Вставьте анализ темы (или заполните настройки и нажмите 1)…',
+         needsSettings: true },
+    3: { step: 'introduction', title: 'ВВЕДЕНИЕ', docTitle: 'Введение',
+         placeholder: 'Вставьте план работы…',
+         needsSettings: true },
+    4: null,   // «Создать курсовую» — сборка из нескольких шагов, отдельная задача
+    5: null,   // «Источники» — ждёт эндпоинта подбора на бэкенде
+    6: null,   // «ГОСТ» — оформление документа
+    7: null,   // «Проверка на ИИ» — есть в Python-бэкенде, не подключено к Node
+    8: { step: 'speech', title: 'РЕЧЬ ПО РАБОТЕ', docTitle: 'Речь для защиты',
+         placeholder: 'Вставьте текст готовой работы…',
+         needsSettings: true },
   };
+
+  // Пункты, для которых кнопка «Настройки» неактивна.
+  function settingsEnabledFor(num) {
+    var cfg = MENU_STEPS[num];
+    return !!(cfg && cfg.needsSettings);
+  }
+
+  // Настройки текущей работы. Пока живут в памяти вкладки: постоянное
+  // хранение появится вместе с модулем Projects на PostgreSQL.
+  var settings = {
+    topic: '',
+    university: '',
+    methodichka: '',
+    wishes: '',
+    sources: [],   // [{filename, chars, title}]
+  };
+
+  function settingsFilled() {
+    return settings.topic.trim().length >= 5;
+  }
 
   var FONT = "'Courier New', monospace";
   var overlay = null;
@@ -195,24 +235,250 @@
     });
   }
 
+  // ------------------------------------------------------ НАСТРОЙКИ
+
+  function fieldRow(labelText, node) {
+    var wrap = el('div', { display: 'flex', flexDirection: 'column', gap: '4px' });
+    wrap.appendChild(el('div', { fontSize: '12px', opacity: '0.8' }, labelText));
+    wrap.appendChild(node);
+    return wrap;
+  }
+
+  function textField(value, minHeight) {
+    var t = el('textarea', {
+      width: '100%', minHeight: minHeight || '38px', resize: 'vertical',
+      boxSizing: 'border-box', background: '#000', color: '#e8e8e8',
+      border: '1px solid #888', fontFamily: FONT, fontSize: '13px', padding: '6px',
+    });
+    t.value = value || '';
+    return t;
+  }
+
+  // Список загруженных источников. Файлы разбираются на бэкенде: там
+  // уже умеют снимать титульный лист и оглавление, а браузер PDF не
+  // читает.
+  function renderSourceList(box) {
+    box.textContent = '';
+    if (!settings.sources.length) {
+      box.appendChild(el('div', { fontSize: '12px', opacity: '0.6' },
+        'Источники не загружены. Без них анализ опирается на автопоиск.'));
+      return;
+    }
+    settings.sources.forEach(function (src, i) {
+      var row = el('div', {
+        display: 'flex', justifyContent: 'space-between', gap: '8px',
+        fontSize: '12px', borderBottom: '1px solid #333', padding: '3px 0',
+      });
+      row.appendChild(el('div', { flex: '1', overflow: 'hidden' },
+        (i + 1) + '. ' + (src.title || src.filename) + '  (' + src.chars + ' зн.)'));
+      var del = el('button', btnStyle(), '[x]');
+      del.style.padding = '0 6px';
+      del.onclick = function () {
+        settings.sources.splice(i, 1);
+        renderSourceList(box);
+      };
+      row.appendChild(del);
+      box.appendChild(row);
+    });
+  }
+
+  function uploadSources(files, statusNode, listNode) {
+    if (!files || !files.length) return;
+    var form = new FormData();
+    for (var i = 0; i < files.length; i++) form.append('files', files[i]);
+    statusNode.textContent = 'Загрузка ' + files.length + ' файл(ов)…';
+
+    fetch('/api/v1/projects/upload/sources', { method: 'POST', body: form })
+      .then(function (r) { return r.json(); })
+      .then(function (data) {
+        (data.accepted || []).forEach(function (a) {
+          settings.sources.push({
+            filename: a.filename,
+            chars: a.chars,
+            title: (a.source && a.source.title) || a.filename,
+            text: (a.source && a.source.fulltext) || '',
+          });
+        });
+        var msg = 'Принято: ' + (data.accepted || []).length;
+        if ((data.rejected || []).length) {
+          msg += '. Отклонено: ' + data.rejected.map(function (r) {
+            return r.filename + ' — ' + r.reason;
+          }).join('; ');
+        }
+        statusNode.textContent = msg;
+        renderSourceList(listNode);
+      })
+      .catch(function (e) {
+        statusNode.textContent = 'Ошибка загрузки: ' + e.message;
+      });
+  }
+
+  function openSettings(onSaved) {
+    closeModal();
+    overlay = el('div', {
+      position: 'fixed', top: '0', left: '0', right: '0', bottom: '0',
+      background: 'rgba(0,0,0,0.75)', zIndex: '1000',
+      display: 'flex', alignItems: 'center', justifyContent: 'center',
+      fontFamily: FONT,
+    });
+
+    var panel = el('div', {
+      width: 'min(760px, 94vw)', maxHeight: '90vh', overflowY: 'auto',
+      display: 'flex', flexDirection: 'column', gap: '10px',
+      background: '#101010', color: '#e8e8e8', border: '2px solid #e8e8e8',
+      boxShadow: '8px 8px 0 rgba(0,0,0,0.6)', padding: '14px',
+    });
+
+    var titleBar = el('div', { display: 'flex', justifyContent: 'space-between', alignItems: 'center' });
+    titleBar.appendChild(el('div', { fontWeight: 'bold', letterSpacing: '2px' }, '▓ НАСТРОЙКИ РАБОТЫ ▓'));
+    var closeBtn = el('button', btnStyle(), '[X] Закрыть');
+    closeBtn.onclick = closeModal;
+    titleBar.appendChild(closeBtn);
+    panel.appendChild(titleBar);
+
+    var topic = textField(settings.topic);
+    topic.placeholder = 'Например: Субсидиарная ответственность контролирующих должника лиц';
+    panel.appendChild(fieldRow('Тема работы (обязательно)', topic));
+
+    var uni = textField(settings.university);
+    uni.placeholder = 'Название вуза, кафедра';
+    panel.appendChild(fieldRow('Учебное заведение', uni));
+
+    var meth = textField(settings.methodichka, '60px');
+    meth.placeholder = 'Вставьте текст методички или загрузите файл ниже';
+    panel.appendChild(fieldRow('Методичка', meth));
+
+    var methStatus = el('div', { fontSize: '12px', opacity: '0.8' }, '');
+    var methInput = el('input');
+    methInput.type = 'file';
+    methInput.accept = '.pdf,.docx,.txt,.md,.rtf';
+    methInput.style.fontFamily = FONT;
+    methInput.style.fontSize = '12px';
+    methInput.onchange = function () {
+      if (!methInput.files.length) return;
+      var form = new FormData();
+      form.append('file', methInput.files[0]);
+      methStatus.textContent = 'Разбор методички…';
+      fetch('/api/v1/projects/upload/methodichka', { method: 'POST', body: form })
+        .then(function (r) { return r.json(); })
+        .then(function (d) {
+          if (d.detail) { methStatus.textContent = 'Ошибка: ' + d.detail; return; }
+          meth.value = d.text || '';
+          var found = (d.found || []).map(function (f) {
+            return f.field + ' = ' + f.value;
+          }).join(', ');
+          methStatus.textContent = found
+            ? 'Распознано: ' + found + '. Проверьте перед запуском.'
+            : 'Текст загружен, требования распознать не удалось.';
+        })
+        .catch(function (e) { methStatus.textContent = 'Ошибка: ' + e.message; });
+    };
+    panel.appendChild(fieldRow('Загрузить методичку файлом', methInput));
+    panel.appendChild(methStatus);
+
+    var wishes = textField(settings.wishes, '48px');
+    wishes.placeholder = 'Например: две главы, больше судебной практики, без таблиц';
+    panel.appendChild(fieldRow('Пожелания к работе', wishes));
+
+    // --- источники
+    panel.appendChild(el('div', {
+      borderTop: '1px solid #444', marginTop: '4px', paddingTop: '8px',
+      fontWeight: 'bold', fontSize: '13px',
+    }, 'ИСТОЧНИКИ'));
+
+    var srcStatus = el('div', { fontSize: '12px', opacity: '0.8' }, '');
+    var srcList = el('div', { display: 'flex', flexDirection: 'column' });
+    renderSourceList(srcList);
+
+    var srcInput = el('input');
+    srcInput.type = 'file';
+    srcInput.multiple = true;
+    srcInput.accept = '.pdf,.docx,.txt,.md,.rtf';
+    srcInput.style.fontFamily = FONT;
+    srcInput.style.fontSize = '12px';
+    srcInput.onchange = function () {
+      uploadSources(srcInput.files, srcStatus, srcList);
+      srcInput.value = '';
+    };
+    panel.appendChild(fieldRow('Добавить свои статьи (PDF, DOCX, TXT)', srcInput));
+    panel.appendChild(srcStatus);
+    panel.appendChild(srcList);
+
+    // --- кнопки
+    var actions = el('div', { display: 'flex', gap: '8px', justifyContent: 'flex-end', marginTop: '6px' });
+    var hint = el('div', { flex: '1', fontSize: '12px', opacity: '0.7' }, '');
+    actions.appendChild(hint);
+
+    var save = el('button', btnStyle(), '[Сохранить]');
+    save.onclick = function () {
+      if (topic.value.trim().length < 5) {
+        hint.textContent = 'Укажите тему работы — без неё шаги не запустятся.';
+        return;
+      }
+      settings.topic = topic.value.trim();
+      settings.university = uni.value.trim();
+      settings.methodichka = meth.value.trim();
+      settings.wishes = wishes.value.trim();
+      closeModal();
+      if (onSaved) onSaved();
+    };
+    actions.appendChild(save);
+    panel.appendChild(actions);
+
+    overlay.appendChild(panel);
+    overlay.addEventListener('mousedown', function (e) { if (e.target === overlay) closeModal(); });
+    document.body.appendChild(overlay);
+    document.addEventListener('keydown', onKeyDown);
+    topic.focus();
+  }
+
   // Находит пункты меню по ведущему номеру («1.», «1)» и т.п.) в текстовом
   // содержимом — устроено так, чтобы работать во всех темах без правки их разметки.
   function wireMenu() {
     var candidates = document.querySelectorAll('.menu-item, .item, .popup-item');
+
     candidates.forEach(function (node) {
+      // Отдельная кнопка настроек: она не пункт конвейера и работает
+      // независимо от того, какой шаг выбран.
+      if (node.getAttribute('data-action') === 'settings') {
+        node.style.cursor = 'pointer';
+        node.addEventListener('click', function () { openSettings(null); });
+        return;
+      }
+
       var m = (node.textContent || '').trim().match(/^([1-8])[.)]/);
       if (!m) return;
       var num = Number(m[1]);
       var cfg = MENU_STEPS[num];
       node.style.cursor = 'pointer';
       node.addEventListener('click', function () {
-        if (cfg) {
-          openModal(cfg);
-        } else {
-          openStub(num);
+        if (!cfg) { openStub(num); return; }
+        // Шаги, которые пишут текст, без темы работать не могут:
+        // сначала настройки, потом сам шаг.
+        if (cfg.needsSettings && !settingsFilled()) {
+          openSettings(function () { openModal(cfg); });
+          return;
         }
+        openModal(cfg);
       });
     });
+
+    highlightSettingsButton();
+  }
+
+  // Кнопка настроек тускнеет, когда активный пункт в них не нуждается.
+  // Совсем прятать её не стоит: пользователь должен видеть, что
+  // настройки существуют.
+  function highlightSettingsButton() {
+    var active = document.querySelector('.item.active, .menu-item.active, .popup-item.active');
+    var num = active ? Number((active.textContent || '').trim().match(/^([1-8])[.)]/) ? RegExp.$1 : 0) : 0;
+    var btn = document.querySelector('[data-action="settings"]');
+    if (!btn) return;
+    var enabled = !num || settingsEnabledFor(num);
+    btn.style.opacity = enabled ? '1' : '0.45';
+    btn.title = enabled
+      ? 'Тема, методичка, пожелания и свои источники'
+      : 'Для этого пункта настройки не нужны';
   }
 
   function openStub(num) {

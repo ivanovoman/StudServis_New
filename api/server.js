@@ -10,6 +10,49 @@ const key = process.env.OPENROUTER_API_KEY;
 app.use(express.json({ limit: '1mb' }));
 app.use(express.static(path.join(__dirname, '..', 'public')));
 
+// Запросы /api/v1/* обслуживает Python-бэкенд (FastAPI): загрузка
+// источников и методички, анализ темы с опорой на публикации,
+// детектор ИИ. Node остаётся раздатчиком статики и старого
+// /api/generate, а браузеру не приходится знать про второй порт.
+//
+// express.json выше уже прочитал тело для JSON-запросов, поэтому
+// пересылаем либо разобранный объект, либо сырой поток (multipart
+// с файлами читать нельзя — он пойдёт как есть).
+const PY_BACKEND = process.env.PY_BACKEND_URL || 'http://127.0.0.1:8000';
+
+app.use('/api/v1', async (req, res) => {
+  const target = PY_BACKEND + '/api/v1' + req.url;
+  const headers = {};
+  if (req.headers['content-type']) headers['content-type'] = req.headers['content-type'];
+
+  const isJson = req.is('application/json');
+  const init = { method: req.method, headers };
+
+  if (req.method !== 'GET' && req.method !== 'HEAD') {
+    if (isJson) {
+      init.body = JSON.stringify(req.body || {});
+    } else {
+      // multipart и прочее — пересылаем поток как есть
+      init.body = req;
+      init.duplex = 'half';
+    }
+  }
+
+  try {
+    const upstream = await fetch(target, init);
+    res.status(upstream.status);
+    const ct = upstream.headers.get('content-type');
+    if (ct) res.set('content-type', ct);
+    const buf = Buffer.from(await upstream.arrayBuffer());
+    res.send(buf);
+  } catch (e) {
+    res.status(502).json({
+      error: 'Python-бэкенд недоступен: ' + e.message +
+             '. Запустите его: cd backend && uvicorn app.main:app --port 8000',
+    });
+  }
+});
+
 // Модель по умолчанию — бесплатная на OpenRouter.
 // ВАЖНО: список бесплатных моделей на OpenRouter меняется без предупреждения.
 // Список ниже ПРОВЕРЕН вживую 01.09.2026 реальными запросами на русском языке.
