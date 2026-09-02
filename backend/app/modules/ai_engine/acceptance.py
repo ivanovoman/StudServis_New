@@ -24,12 +24,12 @@ from enum import Enum
 from typing import Callable, Sequence
 
 from app.modules.humanizer.style_profile import CLICHES, analyze_style
-
-
-class WorkKind(str, Enum):
-    """От вида работы зависят обязательные элементы введения."""
-    coursework = "coursework"      # курсовая — гипотеза НЕ нужна
-    thesis = "thesis"              # диссертация — гипотеза и её оценка нужны
+from app.modules.projects.preferences import (
+    Requirement,
+    Subject,
+    WorkKind,
+    WorkPreferences,
+)
 
 
 def chars_no_spaces(text: str) -> int:
@@ -99,8 +99,10 @@ MIN_SHORT_SENTENCE_SHARE = 0.05
 MAX_SENTENCE_LEN_MEAN = 26.0
 
 
-def check_style(text: str, *, strict_rhythm: bool = True) -> CheckResult:
+def check_style(text: str, *, strict_rhythm: bool = True,
+                prefs: WorkPreferences | None = None) -> CheckResult:
     """Общие стилевые пороги для всех текстовых этапов."""
+    prefs = prefs or WorkPreferences()
     res = CheckResult()
     p = analyze_style([text])
     if p.total_sentences < 5:
@@ -121,13 +123,14 @@ def check_style(text: str, *, strict_rhythm: bool = True) -> CheckResult:
             f"при норме >= {MIN_SHORT_SENTENCE_SHARE:.0%}",
             severity="warning",
         )
-    if p.cliche_per_1k > MAX_CLICHE_PER_1K:
+    max_cliche = (0.5 if prefs.cliche_policy == "strict" else MAX_CLICHE_PER_1K)
+    if p.cliche_per_1k > max_cliche:
         res.add(
             "cliche",
-            f"клише {p.cliche_per_1k}/1000 слов при норме <= {MAX_CLICHE_PER_1K}: "
+            f"клише {p.cliche_per_1k}/1000 слов при норме <= {max_cliche}: "
             f"{list(p.cliche_found)}",
         )
-    elif p.cliche_per_1k > WARN_CLICHE_PER_1K:
+    elif p.cliche_per_1k > WARN_CLICHE_PER_1K and prefs.cliche_policy != "strict":
         res.add(
             "cliche",
             f"клише {p.cliche_per_1k}/1000 слов — выше медианы автора "
@@ -169,14 +172,22 @@ INTRO_ELEMENTS: dict[str, tuple[str, ...]] = {
 HYPOTHESIS_MARKERS = ("гипотез",)
 
 
-def check_introduction(text: str, *, kind: WorkKind = WorkKind.coursework,
-                       task_count: int | None = None) -> CheckResult:
-    """Введение: 3800-5000 знаков б/п + обязательные элементы.
+def check_introduction(text: str, *, prefs: WorkPreferences | None = None,
+                       task_count: int | None = None,
+                       kind: WorkKind | None = None) -> CheckResult:
+    """Введение: объём по настройкам + обязательные элементы.
 
-    Гипотеза требуется только для диссертации (`WorkKind.thesis`).
+    Гипотеза требуется только для диссертации — см. `prefs.needs_hypothesis`.
     """
+    prefs = prefs or WorkPreferences()
+    if kind is not None:                     # обратная совместимость
+        prefs = WorkPreferences.from_dict({**prefs.to_dict(), "kind": kind})
+    vol = prefs.resolved_volumes()
+
     res = CheckResult()
-    res.violations += check_length(text, 3800, 5000, "введение").violations
+    res.violations += check_length(
+        text, vol.intro_min, vol.intro_max, "введение"
+    ).violations
 
     low = (text or "").lower()
     missing = [
@@ -187,9 +198,9 @@ def check_introduction(text: str, *, kind: WorkKind = WorkKind.coursework,
         res.add("intro_elements", f"нет обязательных разделов: {', '.join(missing)}")
 
     has_hypothesis = any(m in low for m in HYPOTHESIS_MARKERS)
-    if kind is WorkKind.thesis and not has_hypothesis:
+    if prefs.needs_hypothesis and not has_hypothesis:
         res.add("hypothesis", "для диссертации нужна гипотеза и её оценка")
-    if kind is WorkKind.coursework and has_hypothesis:
+    if not prefs.needs_hypothesis and has_hypothesis:
         res.add(
             "hypothesis",
             "в курсовой гипотеза не нужна — убрать",
@@ -201,7 +212,6 @@ def check_introduction(text: str, *, kind: WorkKind = WorkKind.coursework,
         res.add("heading", "текст не должен начинаться словом «Введение»")
 
     if task_count:
-        # Задачи обычно перечислены списком или через «-».
         listed = len(re.findall(r"(?m)^\s*(?:[-–•*]|\d+[.)])\s", text or ""))
         if listed and abs(listed - task_count) > 1:
             res.add(
@@ -210,32 +220,43 @@ def check_introduction(text: str, *, kind: WorkKind = WorkKind.coursework,
                 severity="warning",
             )
 
-    res.violations += check_style(text).violations
+    res.violations += check_style(text, prefs=prefs).violations
     return res
 
 
 # ------------------------------------------------------------- этап 5
 
-def check_section(text: str, *, subject_is_legal: bool = True,
-                  previous_texts: Sequence[str] = ()) -> CheckResult:
-    """Раздел: 5000-6000 знаков б/п, ссылки, отсутствие повторов."""
+def check_section(text: str, *, prefs: WorkPreferences | None = None,
+                  previous_texts: Sequence[str] = (),
+                  subject_is_legal: bool | None = None) -> CheckResult:
+    """Раздел: объём, ссылки, визуальные материалы, отсутствие повторов.
+
+    Требования к кейсам и таблицам берутся из настроек, потому что
+    правильный ответ на «нужны ли они» — «зависит от темы».
+    """
+    prefs = prefs or WorkPreferences()
+    if subject_is_legal is not None:         # обратная совместимость
+        prefs = WorkPreferences.from_dict({
+            **prefs.to_dict(),
+            "subject": (Subject.legal if subject_is_legal else Subject.economics).value,
+        })
+    vol = prefs.resolved_volumes()
+
     res = CheckResult()
-    res.violations += check_length(text, 5000, 6000, "раздел").violations
+    res.violations += check_length(
+        text, vol.section_min, vol.section_max, "раздел"
+    ).violations
 
     from app.modules.humanizer.style_profile import RE_CASE, RE_LAW
 
-    if subject_is_legal:
+    if prefs.is_legal:
         # Пороги привязаны к предмету: в экономической работе автора
-        # ссылок на нормы 0.04/1k, в юридической — 4.67. Общий порог
-        # был бы бессмысленным.
+        # ссылок на нормы 0.04/1k, в юридической — 4.67.
         if not RE_LAW.search(text or ""):
             res.add("law_ref", "нет ни одной ссылки на норму права")
-        if not RE_CASE.search(text or ""):
-            res.add(
-                "case_ref",
-                "нет ссылок на судебную практику",
-                severity="warning",
-            )
+
+    res.violations += _check_cases(text, prefs).violations
+    res.violations += _check_visuals(text, prefs).violations
 
     first = (text or "").strip().split("\n", 1)[0].strip()
     if re.match(r"^\d+\.\d+\.?\s", first):
@@ -245,7 +266,86 @@ def check_section(text: str, *, subject_is_legal: bool = True,
     if dup:
         res.add("repetition", f"дословный повтор из другого раздела: «{dup[:60]}...»")
 
-    res.violations += check_style(text).violations
+    res.violations += check_style(text, prefs=prefs).violations
+    return res
+
+
+def _check_cases(text: str, prefs: WorkPreferences) -> CheckResult:
+    """Судебная практика: «может быть, а может и не быть».
+
+    Наличие требуем только когда пользователь явно попросил.
+    """
+    from app.modules.humanizer.style_profile import RE_CASE
+
+    res = CheckResult()
+    if prefs.cases is Requirement.when_relevant:
+        return res                            # по теме — не проверяем
+    found = RE_CASE.findall(text or "")
+    if prefs.cases is Requirement.required:
+        need = max(1, prefs.min_cases_per_section)
+        if len(found) < need:
+            res.add(
+                "case_ref",
+                f"судебной практики {len(found)}, требуется минимум {need}",
+            )
+    elif prefs.cases is Requirement.forbidden and found:
+        res.add(
+            "case_ref",
+            "по теме судебная практика не нужна, а она есть",
+            severity="warning",
+        )
+    return res
+
+
+# Таблица в markdown и подпись к ней/рисунку.
+RE_TABLE_ROW = re.compile(r"(?m)^\s*\|.+\|\s*$")
+RE_TABLE_CAPTION = re.compile(r"(?mi)^\s*Таблица\s*\d*")
+RE_CHART_CAPTION = re.compile(r"(?mi)^\s*(Рис(?:унок|\.)|График|Диаграмма)\s*\d*")
+
+
+def _check_visuals(text: str, prefs: WorkPreferences) -> CheckResult:
+    """Таблицы и графики — там, где уместны.
+
+    Пустые таблицы «без смысла» не нужны: это прямое требование, и
+    оно проверяемо — таблица из одной строки или без данных бракуется.
+    """
+    res = CheckResult()
+    text = text or ""
+
+    has_table = bool(RE_TABLE_CAPTION.search(text) or RE_TABLE_ROW.search(text))
+    has_chart = bool(RE_CHART_CAPTION.search(text))
+
+    if prefs.tables is Requirement.required and not has_table:
+        res.add("table", "в разделе нужна таблица, её нет")
+    if prefs.tables is Requirement.forbidden and has_table:
+        res.add("table", "таблицы в этой работе не нужны", severity="warning")
+    if prefs.charts is Requirement.required and not has_chart:
+        res.add("chart", "в разделе нужен график, его нет")
+
+    # Пустоту проверяем только у markdown-таблиц: в тексте, извлечённом
+    # из PDF, разметка потеряна, и одна подпись «Таблица 1» не значит,
+    # что таблица пустая. Иначе получаем ложные срабатывания на
+    # реальных работах.
+    if prefs.forbid_empty_visuals and RE_TABLE_ROW.search(text):
+        rows = RE_TABLE_ROW.findall(text)
+        # Шапка + разделитель + хотя бы две строки данных.
+        data_rows = [
+            r for r in rows
+            if not re.fullmatch(r"\s*\|[\s|:-]+\|\s*", r)
+        ]
+        if len(data_rows) < 3:
+            res.add(
+                "empty_table",
+                f"таблица почти пустая ({max(0, len(data_rows) - 1)} строк данных) "
+                "— такая таблица не несёт смысла",
+            )
+        # Ячейки-заглушки.
+        if re.search(r"\|\s*(-{1,2}|н/д|нет данных|—|\.\.\.)\s*\|", text, re.I):
+            res.add(
+                "empty_table",
+                "в таблице есть пустые ячейки-заглушки",
+                severity="warning",
+            )
     return res
 
 
@@ -266,26 +366,83 @@ def _find_duplicate_span(text: str, previous: Sequence[str], n: int = 15) -> str
 
 # ------------------------------------------------------------- этап 9
 
-def check_conclusion(text: str, *, intro_text: str = "") -> CheckResult:
-    """Заключение: отвечает на задачи введения, без новых фактов."""
+def check_conclusion(text: str, *, prefs: WorkPreferences | None = None,
+                     intro_text: str = "") -> CheckResult:
+    """Заключение: отвечает на задачи введения, без новых фактов.
+
+    В юридической работе желательны предложения по совершенствованию
+    законодательства — но обоснованные, а не декларативные.
+    """
+    prefs = prefs or WorkPreferences()
+    vol = prefs.resolved_volumes()
+
     res = CheckResult()
-    res.violations += check_length(text, 3000, 5000, "заключение").violations
+    res.violations += check_length(
+        text, vol.conclusion_min, vol.conclusion_max, "заключение"
+    ).violations
 
     first = (text or "").strip().split("\n", 1)[0].strip().lower()
     if first.startswith("заключение"):
         res.add("heading", "текст не должен начинаться словом «Заключение»")
 
-    res.violations += check_style(text).violations
+    res.violations += _check_law_proposals(text, prefs).violations
+    res.violations += check_style(text, prefs=prefs).violations
     return res
 
 
-# ------------------------------------------------------------- этап 2
+RE_PROPOSAL = re.compile(
+    r"(?i)(предлага|целесообразн|следует\s+(?:допол|изменить|внести|закрепить)"
+    r"|необходимо\s+(?:допол|изменить|внести|закрепить)"
+    r"|внести\s+измен|изложить\s+в\s+следующей\s+редакции|дополнить\s+стать)"
+)
+# Обоснование предложения: ссылка на проблему или причину.
+RE_JUSTIFICATION = re.compile(
+    r"(?i)(поскольку|так\s+как|потому\s+что|это\s+позволит|обусловлен"
+    r"|проблем|пробел|противоречи|неопределённост|неопределенност)"
+)
 
-def check_plan(text: str, *, required_chapters: int | None = None) -> CheckResult:
-    """План: обычно 3 главы + выводы, допустимо 2 по методичке.
 
-    Больше, чем нужно, делать не следует — лишние главы это вода.
+def _check_law_proposals(text: str, prefs: WorkPreferences) -> CheckResult:
+    """Предложения по законодательству — «желательны, но обоснованы»."""
+    res = CheckResult()
+    if not prefs.expects_law_proposals:
+        return res
+
+    text = text or ""
+    if not RE_PROPOSAL.search(text):
+        res.add(
+            "law_proposals",
+            "в юридической работе желательны предложения по "
+            "совершенствованию законодательства",
+            severity=(
+                "error" if prefs.law_proposals is Requirement.required
+                else "warning"
+            ),
+        )
+        return res
+
+    # Предложение без обоснования — декларация.
+    if not RE_JUSTIFICATION.search(text):
+        res.add(
+            "law_proposals",
+            "предложения есть, но не обоснованы: не сказано, какую "
+            "проблему они решают",
+        )
+    return res
+
+
+def check_plan(text: str, *, prefs: WorkPreferences | None = None,
+               required_chapters: int | None = None) -> CheckResult:
+    """План: число глав и дробность разделов по настройкам.
+
+    Стандарт — 2 или 3 главы. Больше, чем нужно, делать не следует.
     """
+    prefs = prefs or WorkPreferences()
+    if required_chapters is not None:        # обратная совместимость
+        prefs = WorkPreferences.from_dict({
+            **prefs.to_dict(), "chapters": required_chapters
+        })
+
     res = CheckResult()
 
     chapters = sorted({
@@ -295,25 +452,23 @@ def check_plan(text: str, *, required_chapters: int | None = None) -> CheckResul
     sections = re.findall(r"(?m)^\s*([1-9]\.\d{1,2})[.\s]", text or "")
 
     n = len(chapters)
-    if required_chapters:
-        if n != required_chapters:
+    if n not in prefs.allowed_chapter_counts:
+        if prefs.chapters is not None:
+            res.add("chapters", f"глав {n}, а методичка требует {prefs.chapters}")
+        else:
             res.add(
                 "chapters",
-                f"глав {n}, а методичка требует {required_chapters}",
+                f"глав {n}: стандарт 2 или 3. "
+                "Больше, чем нужно, делать не стоит",
             )
-    elif n not in (2, 3):
-        res.add(
-            "chapters",
-            f"глав {n}: обычно 3, допустимо 2 по методичке. "
-            "Больше, чем нужно, делать не стоит",
-        )
 
     if chapters and chapters != list(range(1, n + 1)):
         res.add("numbering", f"нумерация глав с пропусками: {chapters}")
 
     by_chapter: dict[str, int] = {}
-    for s in sections:
-        by_chapter[s.split(".")[0]] = by_chapter.get(s.split(".")[0], 0) + 1
+    for sec in sections:
+        key = sec.split(".")[0]
+        by_chapter[key] = by_chapter.get(key, 0) + 1
     for ch, cnt in sorted(by_chapter.items()):
         if cnt > 5:
             res.add(
@@ -324,9 +479,8 @@ def check_plan(text: str, *, required_chapters: int | None = None) -> CheckResul
         if cnt < 2:
             res.add("granularity", f"в главе {ch} только {cnt} раздел")
 
-    # Выводы по главам есть в обеих работах автора.
     vyvody = len(re.findall(r"(?mi)^\s*выводы\s+по", text or ""))
-    if n and vyvody < n:
+    if prefs.chapter_conclusions and n and vyvody < n:
         res.add(
             "chapter_conclusions",
             f"выводов по главам {vyvody}, глав {n} — нужны после каждой",
@@ -335,9 +489,35 @@ def check_plan(text: str, *, required_chapters: int | None = None) -> CheckResul
     return res
 
 
+def check_section_plan(theses: Sequence[str], *,
+                       prefs: WorkPreferences | None = None) -> CheckResult:
+    """Поабзацный план раздела: число тезисов зависит от темы.
+
+    «Для сложной и многогранной темы нужно раскрыть нюансы, и пунктов
+    будет больше» — поэтому диапазон из настроек, а не жёсткое число.
+    """
+    prefs = prefs or WorkPreferences()
+    lo, hi = prefs.theses_per_section
+    res = CheckResult()
+    n = len(theses)
+    if n < lo:
+        res.add("theses", f"тезисов {n}, минимум {lo} — тема раскрыта поверхностно")
+    elif n > hi:
+        res.add(
+            "theses",
+            f"тезисов {n}, максимум {hi} — план дробится, укрупните пункты",
+            severity="warning",
+        )
+    empty = [i + 1 for i, t in enumerate(theses) if len((t or "").split()) < 4]
+    if empty:
+        res.add("theses", f"пункты без содержания: {empty}")
+    return res
+
+
 STEP_CHECKS: dict[str, Callable[..., CheckResult]] = {
     "plan": check_plan,
     "introduction": check_introduction,
+    "section_plan": check_section_plan,
     "section_write": check_section,
     "conclusion": check_conclusion,
 }

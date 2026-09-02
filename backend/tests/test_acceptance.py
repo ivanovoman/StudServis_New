@@ -101,9 +101,18 @@ class TestIntroduction:
         assert any("гипотез" in v.message for v in r.violations)
 
     def test_thesis_with_hypothesis_ok(self):
+        """У диссертации свои объёмы: введения автора 9.5 и 10.7 тыс. б/п,
+        курсовые 3800-5000 её забраковали бы."""
         assert check_introduction(
-            self._intro(hypothesis=True), kind=WorkKind.thesis
+            self._intro(9000, hypothesis=True), kind=WorkKind.thesis
         ).passed
+
+    def test_thesis_volumes_differ_from_coursework(self):
+        """Курсовое введение слишком короткое для диссертации."""
+        r = check_introduction(self._intro(4200, hypothesis=True),
+                               kind=WorkKind.thesis)
+        assert not r.passed
+        assert any(v.rule == "length" for v in r.violations)
 
     def test_coursework_hypothesis_is_warning_only(self):
         r = check_introduction(self._intro(hypothesis=True), kind=WorkKind.coursework)
