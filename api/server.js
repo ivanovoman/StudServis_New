@@ -124,6 +124,17 @@ async function callOpenRouterWithFallback(messages) {
   const modelsToTry = [MODEL, ...FALLBACK_MODELS.filter(m => m !== MODEL)];
   let lastError = null;
 
+  // Бесплатные модели упираются в общий пул пачками: бывает, что все
+  // пять подряд отдают 429, а через пару секунд отвечают нормально.
+  // Поэтому после полного круга ждём и пробуем ещё раз.
+  const ROUNDS = 2;
+  const PAUSE_MS = 2500;
+  let fatal = false;   // ошибка ключа: перебирать модели бессмысленно
+
+  for (let round = 0; round < ROUNDS && !fatal; round++) {
+  if (round > 0) {
+    await new Promise(r => setTimeout(r, PAUSE_MS));
+  }
   for (const model of modelsToTry) {
     try {
       const upstream = await fetch(OPENROUTER_URL, {
@@ -147,14 +158,22 @@ async function callOpenRouterWithFallback(messages) {
 
       const errText = await upstream.text().catch(() => '');
       lastError = `(${upstream.status}) модель ${model}: ${errText.slice(0, 200)}`;
-      // Если это не ошибка "модель недоступна", нет смысла пробовать другие модели —
-      // вероятно, проблема в ключе или запросе, а не в конкретной модели.
-      if (upstream.status !== 404 && upstream.status !== 400) {
+
+      // 401/403 — проблема с ключом, перебор моделей не поможет.
+      // Всё остальное (404 модель убрали, 400 битый id, 429 упёрлись
+      // в лимит, 5xx сбой у провайдера) — повод взять следующую.
+      //
+      // 429 особенно важен: бесплатные модели постоянно упираются в
+      // общий пул, и раньше на этом весь запрос обрывался, хотя
+      // соседняя модель ответила бы сразу.
+      if (upstream.status === 401 || upstream.status === 403) {
+        fatal = true;
         break;
       }
     } catch (err) {
       lastError = `модель ${model}: ${err.message}`;
     }
+  }
   }
 
   throw new Error(lastError || 'Все модели недоступны');
@@ -194,6 +213,11 @@ app.post('/api/generate', async (req, res) => {
     const reader = upstream.body.getReader();
     const decoder = new TextDecoder();
     let buffer = '';
+    // Считаем, пришёл ли хоть один кусок текста. Бывает, что модель
+    // отвечает 200, но поток пустой: она ушла в reasoning и не выдала
+    // ни одного content-токена. Раньше это выглядело как «нажал и
+    // ничего не произошло» — хуже явной ошибки.
+    let sentAny = false;
 
     while (true) {
       const { done, value } = await reader.read();
@@ -215,8 +239,14 @@ app.post('/api/generate', async (req, res) => {
 
         try {
           const parsed = JSON.parse(data);
-          const delta = parsed.choices?.[0]?.delta?.content;
+          const choice = parsed.choices?.[0];
+          // Часть моделей кладёт текст в reasoning_content, а не в
+          // content — забираем оба варианта.
+          const delta = choice?.delta?.content
+            || choice?.delta?.reasoning_content
+            || '';
           if (delta) {
+            sentAny = true;
             // Пробрасываем кусочек текста клиенту как есть
             res.write(`data: ${JSON.stringify({ delta })}\n\n`);
           }
@@ -224,6 +254,13 @@ app.post('/api/generate', async (req, res) => {
           // Пропускаем строки, которые не являются валидным JSON (keep-alive комментарии и т.п.)
         }
       }
+    }
+
+    if (!sentAny) {
+      res.write(`data: ${JSON.stringify({
+        error: `модель ${usedModel} вернула пустой ответ. `
+             + 'Нажмите «Выполнить» ещё раз — запрос уйдёт на другую модель.',
+      })}\n\n`);
     }
 
     res.end();
