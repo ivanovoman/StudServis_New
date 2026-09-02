@@ -254,3 +254,45 @@ class TestCalibrationAgainstAuthor:
             for i in range(40)
         )
         assert not check_style(flat).passed
+
+
+class TestArticleRhythm:
+    """Статьи автора: низкий разброс длин, но много коротких фраз.
+
+    Порог только по sd бракавал 7 из 7 фрагментов его статей —
+    правило исправлено на двойное условие.
+    """
+
+    def _article_like(self) -> str:
+        """Короткая живая проза: sd низкий, коротких фраз много."""
+        return " ".join([
+            "Открыть кофейню просто. Так кажется на старте.",
+            "Аренда съедает половину. Персонал ещё треть.",
+            "Считайте заранее. Иначе вылетите в первый год.",
+            "Оборудование можно взять бэушное. Кофемашина решает всё.",
+            "Локация важнее интерьера. Проверено многими.",
+            "Поток людей считают ногами. Встаньте и посчитайте сами.",
+            "Меню держите коротким. Гость не любит выбирать долго.",
+            "Себестоимость чашки копеечная. Наценка живёт за счёт места.",
+        ] * 3)
+
+    def test_short_prose_not_flagged_as_machine(self):
+        from app.modules.humanizer.style_profile import analyze_style
+        t = self._article_like()
+        p = analyze_style([t])
+        assert p.sentence_len_stdev < 8.7, "фикстура должна иметь низкий sd"
+        assert p.short_sentence_share >= 0.15
+        r = check_style(t)
+        assert not any(v.rule == "rhythm" and v.severity == "error"
+                       for v in r.violations), r.report()
+
+    def test_flat_and_lifeless_still_rejected(self):
+        """Машинный текст проваливает ОБА условия."""
+        flat = " ".join(
+            "Данное обстоятельство имеет существенное значение для "
+            f"правоприменительной практики в случае номер {i}."
+            for i in range(40)
+        )
+        r = check_style(flat)
+        assert any(v.rule == "rhythm" and v.severity == "error"
+                   for v in r.violations)

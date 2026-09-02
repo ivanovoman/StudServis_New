@@ -82,6 +82,9 @@ REF_CLICHE_PER_1K = 1.95
 # ритме) отсекается вместе с нижним хвостом.
 REF_SENTENCE_STDEV_SECTION_MEDIAN = 14.7
 MIN_SENTENCE_STDEV = 8.7                              # p10 разделов автора
+# Доля коротких фраз, при которой текст живой даже без перепадов длины.
+# У статей автора она 0.22-0.42 при sd всего 5.2-8.4.
+LIVELY_SHORT_SHARE = 0.15
 
 # Клише: НЕ ноль. Автор сам пишет «таким образом» 46 раз на две работы.
 # Требовать ноль — требовать быть чище автора, чей стиль копируем.
@@ -118,14 +121,36 @@ def check_style(text: str, *, strict_rhythm: bool = True,
     if p.total_sentences < 5:
         return res  # слишком короткий фрагмент, метрики недостоверны
 
-    if strict_rhythm and p.sentence_len_stdev < MIN_SENTENCE_STDEV:
+    # Ритм проверяется ДВУМЯ путями, а не одним.
+    #
+    # Порог по одному лишь разбросу длин был неверен: статьи автора
+    # имеют sd 5.2-8.4 (ниже порога 8.7), и правило браковало 7 из 7
+    # фрагментов его собственных статей. Причина в том, чтокороткая
+    # проза даёт низкий разброс просто потому, что все предложения
+    # короткие — это признак живости, а не машинности.
+    #
+    # Настоящий машинный текст проваливает ОБА условия сразу: ровный
+    # ритм И почти нет коротких фраз. Поэтому брак ставим только когда
+    # не выполнено ни одно.
+    rhythm_ok = p.sentence_len_stdev >= MIN_SENTENCE_STDEV
+    liveliness_ok = p.short_sentence_share >= LIVELY_SHORT_SHARE
+    if strict_rhythm and not rhythm_ok and not liveliness_ok:
         res.add(
             "rhythm",
-            f"ровный ритм: разброс длин {p.sentence_len_stdev} при норме "
-            f">= {MIN_SENTENCE_STDEV} (медиана разделов автора "
-            f"{REF_SENTENCE_STDEV_SECTION_MEDIAN}). "
-            "Читается как ИИ — нужны короткие предложения вперемешку с длинными",
+            f"мёртвый ритм: разброс длин {p.sentence_len_stdev} "
+            f"(норма >= {MIN_SENTENCE_STDEV}) И коротких предложений "
+            f"{p.short_sentence_share:.0%} (норма >= {LIVELY_SHORT_SHARE:.0%}). "
+            "Текст читается как машинный: нужны либо короткие фразы, "
+            "либо перепады длины",
         )
+    elif strict_rhythm and not rhythm_ok:
+        res.add(
+            "rhythm",
+            f"ровный ритм (разброс {p.sentence_len_stdev}), но живость "
+            f"держится на коротких фразах ({p.short_sentence_share:.0%})",
+            severity="warning",
+        )
+
     if p.short_sentence_share < MIN_SHORT_SENTENCE_SHARE:
         res.add(
             "short_sentences",

@@ -468,3 +468,42 @@ class TestSetupAPI:
     def test_unknown_preset_404(self, client):
         r = client.post("/api/v1/projects/setup", json={"preset": "nope"})
         assert r.status_code == 404
+
+
+class TestDetectorBridge:
+    """Снятие разметки перед стилевой оценкой.
+
+    Сравнение markdown с текстом из PDF даёт ложный сигнал: детектор
+    разделяет источник данных, а не авторство (AUC 0.375 против 0.893).
+    """
+
+    def test_strips_bold_and_headings(self):
+        from app.modules.humanizer.detector_bridge import strip_markdown
+        out = strip_markdown("## Заголовок\n\nЭто **важный** текст.")
+        assert "**" not in out and "##" not in out
+        assert "важный" in out and "Заголовок" in out
+
+    def test_strips_bullets_keeps_content(self):
+        from app.modules.humanizer.detector_bridge import strip_markdown
+        out = strip_markdown("- первый пункт\n- второй пункт")
+        assert not out.startswith("-")
+        assert "первый пункт" in out and "второй пункт" in out
+
+    def test_keeps_numbered_lists(self):
+        """Цифры бывают и в живом тексте — их удаление исказит смысл."""
+        from app.modules.humanizer.detector_bridge import strip_markdown
+        assert "1." in strip_markdown("1. Первое основание")
+
+    def test_keeps_punctuation_and_dashes(self):
+        from app.modules.humanizer.detector_bridge import strip_markdown
+        out = strip_markdown("Текст — с тире, и запятой; и точкой.")
+        assert "—" in out and ";" in out
+
+    def test_empty_safe(self):
+        from app.modules.humanizer.detector_bridge import strip_markdown
+        assert strip_markdown("") == ""
+
+    def test_calibration_recorded(self):
+        from app.modules.humanizer.detector_bridge import CALIBRATION
+        assert CALIBRATION["auc"] > CALIBRATION["auc_before_stripping_markdown"]
+        assert CALIBRATION["auc"] > 0.8
