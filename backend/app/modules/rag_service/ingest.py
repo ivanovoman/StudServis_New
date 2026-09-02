@@ -335,7 +335,11 @@ def chunk_style_articles(text: str, *, source: str = "стиль_коколов.
 # «ГЛАВА 1» и «ЗАКЛЮЧЕНИЕ» капсом, в другой — «Глава 2» и «Заключение»
 # строчными. Поэтому везде re.I, иначе половина структуры теряется.
 RE_CHAPTER = re.compile(r"^ГЛАВА\s+(\d+)[.\s]\s*(.*)$", re.I)
-RE_SECTION = re.compile(r"^(\d+\.\d+)\.?\s+(.+)$")
+# Номер раздела: глава 1-9, раздел 1-19. Ограничение по величине —
+# защита от ложных срабатываний на юридических ссылках: строка,
+# начинающаяся со «ст. 61.11 ...» или «53.1 Постановления...», иначе
+# распознавалась как раздел, и в структуре появлялись «главы» 53 и 61.
+RE_SECTION = re.compile(r"^([1-9]\.\d{1,2})\.?\s+(.+)$")
 # «Выводы по главе 1» и «Выводы по 1 главе» — обе формулировки встречаются.
 RE_CONCLUSIONS = re.compile(
     r"^Выводы\s+по\s+(?:главе\s+(\d+)|(\d+)\s+главе)", re.I
@@ -371,8 +375,9 @@ def chunk_thesis(
                           drop_promo=False, collapse_lines=False)
 
     # Разбираем на блоки по структурным заголовкам.
-    blocks: list[tuple[str, str, dict]] = []  # (kind, title, text)
+    blocks: list[tuple[str, str, str, dict]] = []  # (kind, title, text, meta)
     current_kind, current_title, buf = "preamble", "Титул", []
+    current_meta: dict = {}
     meta: dict = {}
 
     for line in text.split("\n"):
@@ -401,20 +406,22 @@ def chunk_thesis(
 
         if kind:
             if buf:
-                blocks.append((current_kind, current_title, "\n".join(buf)))
+                blocks.append(
+                    (current_kind, current_title, "\n".join(buf), current_meta)
+                )
             current_kind, current_title, buf = kind, title, []
-            blocks and blocks[-1]
+            current_meta = meta
             continue
         buf.append(line)
 
     if buf:
-        blocks.append((current_kind, current_title, "\n".join(buf)))
+        blocks.append((current_kind, current_title, "\n".join(buf), current_meta))
 
     # Куда какой блок кладём.
     to_examples = {"introduction", "conclusion", "chapter_conclusions"}
     chunks: list[Chunk] = []
 
-    for kind, title, body in blocks:
+    for kind, title, body, block_meta in blocks:
         body = _collapse(body.strip())
         # preamble — титул и оглавление, bibliography/appendix — не проза.
         if kind in ("preamble", "bibliography", "appendix") or len(body) < 300:
@@ -439,6 +446,9 @@ def chunk_thesis(
                         "topic": topic,
                         "chunk_index": i,
                         "quality": "high",
+                        # number/chapter — из block_meta, иначе номера
+                        # разделов терялись и структуру было не восстановить.
+                        **block_meta,
                     },
                 )
             )
