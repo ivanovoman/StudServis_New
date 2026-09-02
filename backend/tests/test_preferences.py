@@ -332,3 +332,139 @@ class TestLiveliness:
     def test_summary_mentions_liveliness(self):
         assert "живость" in WorkPreferences().summary().lower()
         assert "повышенная" in WorkPreferences(liveliness="high").summary().lower()
+
+
+class TestMethodichka:
+    """Настройки из методички вуза."""
+
+    SAMPLE = """
+    МЕТОДИЧЕСКИЕ УКАЗАНИЯ по выполнению курсовой работы
+    для студентов юридического факультета.
+    Курсовая работа должна состоять из двух глав.
+    Общий объём работы 30-35 страниц машинописного текста.
+    После каждой главы приводятся выводы по главе.
+    Обязательно использование судебной практики Верховного Суда РФ.
+    """
+
+    def test_extracts_chapters(self):
+        from app.modules.projects.methodichka import parse_methodichka
+        r = parse_methodichka(self.SAMPLE)
+        assert r.as_overrides()["chapters"] == 2
+
+    def test_extracts_kind_and_subject(self):
+        from app.modules.projects.methodichka import parse_methodichka
+        o = parse_methodichka(self.SAMPLE).as_overrides()
+        assert o["kind"] == "coursework"
+        assert o["subject"] == "legal"
+
+    def test_extracts_cases_requirement(self):
+        from app.modules.projects.methodichka import parse_methodichka
+        assert parse_methodichka(self.SAMPLE).as_overrides()["cases"] == "required"
+
+    def test_every_finding_has_a_quote(self):
+        """Пользователь должен видеть, откуда взялось значение."""
+        from app.modules.projects.methodichka import parse_methodichka
+        r = parse_methodichka(self.SAMPLE)
+        assert r.findings
+        assert all(f.quote.strip() for f in r.findings)
+
+    def test_pages_converted_to_chars(self):
+        from app.modules.projects.methodichka import pages_to_chars_no_spaces
+        # страница ГОСТ ~1800 знаков с пробелами -> ~1578 без
+        assert 1400 < pages_to_chars_no_spaces(1) < 1700
+
+    def test_empty_input_safe(self):
+        from app.modules.projects.methodichka import parse_methodichka
+        assert parse_methodichka("").findings == []
+
+    def test_garbage_input_does_not_crash(self):
+        from app.modules.projects.methodichka import parse_methodichka
+        parse_methodichka("рыба текст без требований ¯\\_(ツ)_/¯")
+
+
+class TestWishes:
+    """Свободные пожелания клиента."""
+
+    def test_more_practice(self):
+        from app.modules.projects.methodichka import parse_wishes
+        assert parse_wishes("хочу побольше практики").as_overrides()["cases"] == "required"
+
+    def test_no_water_boosts_liveliness(self):
+        from app.modules.projects.methodichka import parse_wishes
+        o = parse_wishes("только без воды, пожалуйста").as_overrides()
+        assert o["liveliness"] == "high"
+
+    def test_strict_style_keeps_normal(self):
+        from app.modules.projects.methodichka import parse_wishes
+        o = parse_wishes("нужен строго научный стиль").as_overrides()
+        assert o["liveliness"] == "normal"
+
+    def test_no_tables(self):
+        from app.modules.projects.methodichka import parse_wishes
+        assert parse_wishes("без таблиц").as_overrides()["tables"] == "forbidden"
+
+
+class TestPriorityOrder:
+    """Приоритет: умолчания < пресет < методичка < пожелания < явный выбор."""
+
+    def test_methodichka_beats_preset(self):
+        from app.modules.projects.methodichka import build_preferences
+        prefs, _, _ = build_preferences(
+            base=PRESETS["thesis_legal"],          # там chapters=3
+            methodichka_text="Работа должна состоять из двух глав.",
+        )
+        assert prefs.chapters == 2
+
+    def test_explicit_beats_methodichka(self):
+        """Явный выбор пользователя нельзя молча переписывать."""
+        from app.modules.projects.methodichka import build_preferences
+        prefs, _, _ = build_preferences(
+            methodichka_text="Работа должна состоять из двух глав.",
+            explicit={"chapters": 3},
+        )
+        assert prefs.chapters == 3
+
+    def test_wishes_beat_methodichka(self):
+        from app.modules.projects.methodichka import build_preferences
+        prefs, _, _ = build_preferences(
+            methodichka_text="Обязательно использование судебной практики.",
+            wishes_text="без судебной практики",
+        )
+        assert prefs.cases is Requirement.forbidden
+
+    def test_hypothesis_in_methodichka_implies_thesis(self):
+        from app.modules.projects.methodichka import build_preferences
+        prefs, _, _ = build_preferences(
+            methodichka_text="Автор должен сформулировать гипотезу исследования.",
+        )
+        assert prefs.needs_hypothesis
+
+
+class TestSetupAPI:
+    @pytest.fixture
+    def client(self):
+        from fastapi.testclient import TestClient
+        from app.main import app
+        return TestClient(app)
+
+    def test_setup_returns_justifications(self, client):
+        r = client.post("/api/v1/projects/setup", json={
+            "methodichka_text": "Курсовая работа состоит из двух глав. "
+                                "Обязательно использование судебной практики.",
+            "wishes_text": "побольше таблиц",
+        })
+        assert r.status_code == 200
+        b = r.json()
+        assert b["preferences"]["chapters"] == 2
+        assert b["preferences"]["tables"] == "required"
+        assert b["needs_confirmation"]
+        assert all("quote" in f for f in b["from_methodichka"])
+
+    def test_setup_without_input_uses_defaults(self, client):
+        r = client.post("/api/v1/projects/setup", json={})
+        assert r.status_code == 200
+        assert not r.json()["needs_confirmation"]
+
+    def test_unknown_preset_404(self, client):
+        r = client.post("/api/v1/projects/setup", json={"preset": "nope"})
+        assert r.status_code == 404

@@ -10,6 +10,7 @@ from __future__ import annotations
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
+from app.modules.projects.methodichka import build_preferences
 from app.modules.projects.preferences import (
     PRESETS,
     Requirement,
@@ -165,3 +166,58 @@ def get_preset(name: str) -> dict:
         )
     p = PRESETS[name]
     return {"name": name, "preferences": p.to_dict(), "summary": p.summary()}
+
+
+class SetupIn(BaseModel):
+    """Полная настройка до генерации: методичка + пожелания + форма."""
+    preset: str | None = None
+    methodichka_text: str = Field(default="", max_length=200_000)
+    wishes_text: str = Field(default="", max_length=5_000)
+    explicit: dict = Field(default_factory=dict)
+
+
+@router.post("/setup")
+def setup(payload: SetupIn) -> dict:
+    """Собирает настройки из методички, пожеланий и явного выбора.
+
+    Возвращает не только результат, но и обоснование каждого
+    распознанного требования — пользователь должен видеть, откуда
+    взялось значение, и иметь возможность его поправить.
+    """
+    base = None
+    if payload.preset:
+        if payload.preset not in PRESETS:
+            raise HTTPException(
+                status_code=404,
+                detail=f"неизвестный пресет {payload.preset}; доступны: {list(PRESETS)}",
+            )
+        base = PRESETS[payload.preset]
+
+    try:
+        prefs, m_res, w_res = build_preferences(
+            base=base,
+            methodichka_text=payload.methodichka_text,
+            wishes_text=payload.wishes_text,
+            explicit=payload.explicit or None,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    def _dump(res):
+        return [
+            {
+                "field": f.field, "value": f.value,
+                "quote": f.short_quote(), "confidence": f.confidence,
+            }
+            for f in res.findings
+        ]
+
+    return {
+        "ok": True,
+        "summary": prefs.summary(),
+        "preferences": prefs.to_dict(),
+        "from_methodichka": _dump(m_res),
+        "from_wishes": _dump(w_res),
+        "notes": m_res.unparsed_notes,
+        "needs_confirmation": bool(m_res.findings or w_res.findings),
+    }
