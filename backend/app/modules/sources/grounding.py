@@ -98,11 +98,16 @@ def format_sources_for_prompt(sources: list[Source]) -> str:
     """
     lines = []
     for i, s in enumerate(sources, 1):
-        body = s.content
         limit = (MAX_FULLTEXT_IN_PROMPT if s.fulltext
                  else MAX_ABSTRACT_IN_PROMPT)
-        if len(body) > limit:
-            body = body[:limit].rsplit(" ", 1)[0] + "…"
+        if s.provider == "user_upload" and s.fulltext:
+            # У загруженного документа начало — титульник и оглавление.
+            from app.modules.sources.user_upload import meaningful_excerpt
+            body = meaningful_excerpt(s.fulltext, limit)
+        else:
+            body = s.content
+            if len(body) > limit:
+                body = body[:limit].rsplit(" ", 1)[0] + "…"
         label = "Фрагмент статьи" if s.fulltext else "Аннотация"
         who = ", ".join(s.authors[:2]) if s.authors else "автор не указан"
         lines.append(
@@ -310,6 +315,7 @@ async def analyze_topic_grounded(
     router=None,
     sources: list[Source] | None = None,
     directions: list[str] | None = None,
+    uploaded: list[Source] | None = None,
 ) -> tuple[GroundedAnalysis, list[str]]:
     """Полный этап 1: предварительный разбор → поиск → анализ по источникам."""
     from app.modules.ai_engine.topic_analysis import analyze_topic
@@ -325,7 +331,16 @@ async def analyze_topic_grounded(
     # Шаг 2: реальные источники из всех доступных баз.
     if sources is None:
         from app.modules.sources.registry import find_sources
-        sources = await find_sources(topic, directions, limit=6)
+        found = await find_sources(topic, directions, limit=6)
+        if uploaded:
+            # Загруженные пользователем идут первыми и не вытесняются.
+            from app.modules.sources.user_upload import merge_with_found
+            sources = merge_with_found(uploaded, found, limit=6)
+        else:
+            sources = found
+    elif uploaded:
+        from app.modules.sources.user_upload import merge_with_found
+        sources = merge_with_found(uploaded, sources, limit=6)
 
     if len(sources) < MIN_SOURCES_FOR_GROUNDING:
         return (

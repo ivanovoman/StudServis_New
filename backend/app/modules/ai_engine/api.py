@@ -18,6 +18,8 @@ class AnalyzeTopicIn(BaseModel):
     topic: str = Field(min_length=5, max_length=500)
     preferences: dict = Field(default_factory=dict)
     with_sources: bool = True
+    #: Источники, загруженные пользователем: сырой текст + метаданные.
+    uploaded_sources: list[dict] = Field(default_factory=list)
     """Искать реальные публикации и строить анализ на них.
 
     Выключать стоит только когда нужен быстрый черновик: без
@@ -76,9 +78,29 @@ async def analyze_topic_grounded_endpoint(payload: AnalyzeTopicIn) -> dict:
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
+    uploaded = []
+    if payload.uploaded_sources:
+        from app.modules.sources.user_upload import UploadError, build_source
+        for i, item in enumerate(payload.uploaded_sources, 1):
+            text = (item.get("text") or "").strip()
+            if not text:
+                continue
+            try:
+                uploaded.append(build_source(
+                    item.get("filename") or f"источник {i}",
+                    text,
+                    title=item.get("title"),
+                    year=item.get("year"),
+                    authors=item.get("authors"),
+                ).source)
+            except UploadError as exc:
+                raise HTTPException(
+                    status_code=422,
+                    detail=f"источник {i}: {exc}") from exc
+
     try:
         analysis, problems = await analyze_topic_grounded(
-            payload.topic, prefs=prefs)
+            payload.topic, prefs=prefs, uploaded=uploaded or None)
     except ValueError as exc:
         raise HTTPException(
             status_code=502,
