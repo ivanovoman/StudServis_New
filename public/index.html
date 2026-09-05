@@ -11,13 +11,31 @@
 </head>
 <body>
     <script>
+        // Кто уже прошёл заставку и «вернулся в будущее», попадает сразу
+        // в современный интерфейс: заставлять смотреть вступление на
+        // каждый заход — издевательство над постоянным пользователем.
+        // Вернуться в ретро можно кнопкой в шапке или ?retro=1.
+        var params = new URLSearchParams(window.location.search);
+
+        if (params.get("retro") === "1") {
+            localStorage.removeItem("studservis_modern_ui");
+            sessionStorage.removeItem("studservis_intro_seen");
+        } else if (localStorage.getItem("studservis_modern_ui") === "1") {
+            window.location.replace("modern.html");
+        }
+
         // ?theme=Windows_95.html — открыть конкретную тему (для отладки)
-        const params = new URLSearchParams(window.location.search);
-        const requested = params.get("theme");
-        const theme = THEMES.includes(requested)
+        var requested = params.get("theme");
+        var theme = THEMES.includes(requested)
             ? requested
             : THEMES[Math.floor(Math.random() * THEMES.length)];
-        window.location.replace("themes/" + theme);
+
+        // Параметры заставки пробрасываем в тему: ?intro=off выключает,
+        // ?intro=1 показывает принудительно.
+        var intro = params.get("intro");
+        var suffix = intro ? ("?intro=" + encodeURIComponent(intro)) : "";
+
+        window.location.replace("themes/" + theme + suffix);
     </script>
     <noscript>
         <p style="color:#ffb000;font-family:monospace;">

@@ -1,0 +1,296 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Сервис студенческих работ</title>
+<style>
+  /* Шрифты системные: у Apple это San Francisco, на других платформах
+     подхватится ближайший гротеск. Так интерфейс выглядит «своим» на
+     любой машине и ничего не тянется по сети. */
+  :root {
+    --bg: #ffffff;
+    --bg-soft: #f5f5f7;
+    --text: #1d1d1f;
+    --text-soft: #6e6e73;
+    --line: rgba(0,0,0,.10);
+    --accent: #0071e3;
+    --accent-press: #0077ed;
+    --ok: #1d8f4e;
+    --warn: #9a6700;
+    --radius: 18px;
+    --shadow: 0 4px 24px rgba(0,0,0,.06);
+    --maxw: 980px;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #000000;
+      --bg-soft: #1c1c1e;
+      --text: #f5f5f7;
+      --text-soft: #a1a1a6;
+      --line: rgba(255,255,255,.14);
+      --accent: #0a84ff;
+      --accent-press: #409cff;
+      --ok: #30d158;
+      --warn: #ffd60a;
+      --shadow: 0 4px 24px rgba(0,0,0,.5);
+    }
+  }
+
+  * { box-sizing: border-box; }
+
+  html { -webkit-text-size-adjust: 100%; }
+
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text",
+                 "Helvetica Neue", "Segoe UI", Roboto, Arial, sans-serif;
+    font-size: 17px;
+    line-height: 1.47;
+    letter-spacing: -0.01em;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  /* --- Шапка: полупрозрачная, с размытием, как у apple.com --- */
+  header {
+    position: sticky; top: 0; z-index: 50;
+    background: color-mix(in srgb, var(--bg) 72%, transparent);
+    backdrop-filter: saturate(180%) blur(20px);
+    -webkit-backdrop-filter: saturate(180%) blur(20px);
+    border-bottom: 1px solid var(--line);
+  }
+  .bar {
+    max-width: var(--maxw); margin: 0 auto;
+    padding: 0 22px; height: 52px;
+    display: flex; align-items: center; gap: 18px;
+  }
+  .brand { font-size: 15px; font-weight: 600; letter-spacing: -0.02em; }
+  .bar nav { margin-left: auto; display: flex; gap: 20px; }
+  .bar nav button {
+    background: none; border: 0; padding: 0; cursor: pointer;
+    color: var(--text-soft); font: inherit; font-size: 13px;
+  }
+  .bar nav button:hover { color: var(--text); }
+
+  /* --- Первый экран --- */
+  .hero {
+    max-width: var(--maxw); margin: 0 auto;
+    padding: 72px 22px 40px; text-align: center;
+  }
+  .hero h1 {
+    margin: 0 0 14px;
+    font-size: clamp(34px, 6vw, 56px);
+    line-height: 1.06; font-weight: 600; letter-spacing: -0.03em;
+  }
+  .hero p {
+    margin: 0 auto; max-width: 620px;
+    font-size: clamp(17px, 2.2vw, 21px); color: var(--text-soft);
+  }
+  .hero .accent { color: var(--accent); }
+
+  /* --- Сетка возможностей --- */
+  .grid {
+    max-width: var(--maxw); margin: 0 auto;
+    padding: 20px 22px 80px;
+    display: grid; gap: 14px;
+    grid-template-columns: repeat(auto-fit, minmax(270px, 1fr));
+  }
+
+  .card {
+    position: relative; text-align: left;
+    background: var(--bg-soft); border: 1px solid transparent;
+    border-radius: var(--radius); padding: 22px 22px 20px;
+    cursor: pointer; font: inherit; color: inherit;
+    transition: transform .25s cubic-bezier(.16,1,.3,1),
+                box-shadow .25s, border-color .2s;
+  }
+  .card:hover { transform: translateY(-3px); box-shadow: var(--shadow); }
+  .card:active { transform: translateY(-1px); }
+  .card:focus-visible { outline: 3px solid var(--accent); outline-offset: 3px; }
+
+  .card .num {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 27px; height: 27px; border-radius: 50%;
+    background: var(--accent); color: #fff;
+    font-size: 13px; font-weight: 600; margin-bottom: 13px;
+  }
+  .card h3 { margin: 0 0 5px; font-size: 18px; font-weight: 600;
+             letter-spacing: -0.02em; }
+  .card p { margin: 0; font-size: 14px; color: var(--text-soft); }
+
+  .tag {
+    position: absolute; top: 18px; right: 18px;
+    font-size: 11px; font-weight: 600; letter-spacing: .02em;
+    padding: 3px 9px; border-radius: 100px;
+  }
+  .tag.free { background: rgba(29,143,78,.12); color: var(--ok); }
+  .tag.soon { background: rgba(120,120,128,.16); color: var(--text-soft); }
+
+  .card.disabled { cursor: default; opacity: .62; }
+  .card.disabled:hover { transform: none; box-shadow: none; }
+  .card.disabled .num { background: var(--text-soft); }
+
+  /* --- Модальное окно --- */
+  .scrim {
+    position: fixed; inset: 0; z-index: 100;
+    background: rgba(0,0,0,.42);
+    backdrop-filter: blur(3px); -webkit-backdrop-filter: blur(3px);
+    display: flex; align-items: center; justify-content: center;
+    padding: 20px;
+    animation: fade .22s ease-out;
+  }
+  @keyframes fade { from { opacity: 0 } to { opacity: 1 } }
+
+  .sheet {
+    width: min(760px, 100%); max-height: 88vh;
+    display: flex; flex-direction: column;
+    background: var(--bg); border-radius: 22px;
+    box-shadow: 0 24px 70px rgba(0,0,0,.3);
+    overflow: hidden;
+    animation: rise .34s cubic-bezier(.16,1,.3,1);
+  }
+  @keyframes rise {
+    from { opacity: 0; transform: translateY(16px) scale(.98) }
+    to   { opacity: 1; transform: none }
+  }
+
+  .sheet-head {
+    display: flex; align-items: center; gap: 12px;
+    padding: 17px 20px; border-bottom: 1px solid var(--line);
+  }
+  .sheet-head h2 { margin: 0; font-size: 17px; font-weight: 600;
+                   letter-spacing: -0.02em; }
+  .x {
+    margin-left: auto; width: 30px; height: 30px; border: 0;
+    border-radius: 50%; cursor: pointer;
+    background: var(--bg-soft); color: var(--text-soft);
+    font-size: 17px; line-height: 1;
+  }
+  .x:hover { color: var(--text); }
+
+  .sheet-body { padding: 20px; overflow: auto; }
+
+  label.field { display: block; font-size: 13px; color: var(--text-soft);
+                margin-bottom: 7px; }
+
+  textarea, input[type=text] {
+    width: 100%; font: inherit; font-size: 16px;
+    color: var(--text); background: var(--bg-soft);
+    border: 1px solid var(--line); border-radius: 12px;
+    padding: 12px 14px; resize: vertical;
+    transition: border-color .18s, box-shadow .18s;
+  }
+  textarea:focus, input[type=text]:focus {
+    outline: none; border-color: var(--accent);
+    box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent) 18%, transparent);
+  }
+
+  .row { display: flex; align-items: center; gap: 12px;
+         flex-wrap: wrap; margin-top: 15px; }
+
+  .btn {
+    border: 0; border-radius: 100px; cursor: pointer;
+    font: inherit; font-size: 15px; font-weight: 500;
+    padding: 10px 20px;
+    background: var(--accent); color: #fff;
+    transition: background .18s, transform .12s;
+  }
+  .btn:hover { background: var(--accent-press); }
+  .btn:active { transform: scale(.975); }
+  .btn[disabled] { opacity: .45; cursor: default; transform: none; }
+  .btn.ghost { background: var(--bg-soft); color: var(--text); }
+
+  .status { font-size: 13px; color: var(--text-soft); }
+
+  /* Индикатор занятости: три точки, спокойная амплитуда */
+  .dots { display: inline-flex; gap: 4px; vertical-align: middle;
+          margin-right: 7px; }
+  .dots i {
+    width: 5px; height: 5px; border-radius: 50%;
+    background: var(--text-soft); display: block;
+    animation: pulse 1.25s infinite ease-in-out;
+  }
+  .dots i:nth-child(2) { animation-delay: .16s }
+  .dots i:nth-child(3) { animation-delay: .32s }
+  @keyframes pulse {
+    0%, 80%, 100% { opacity: .25; transform: scale(.85) }
+    40%           { opacity: 1;   transform: scale(1) }
+  }
+
+  /* --- Панель источников --- */
+  .sources {
+    margin-top: 16px; padding: 14px 16px;
+    background: var(--bg-soft); border-radius: 14px;
+    font-size: 13px;
+  }
+  .sources h4 { margin: 0 0 9px; font-size: 13px; font-weight: 600; }
+  .sources ol { margin: 0; padding-left: 19px; }
+  .sources li { margin-bottom: 7px; }
+  .sources a { color: var(--accent); text-decoration: none; }
+  .sources a:hover { text-decoration: underline; }
+  .sources .meta { color: var(--text-soft); font-size: 12px; }
+  .sources.warn {
+    background: color-mix(in srgb, var(--warn) 12%, transparent);
+    color: var(--warn);
+  }
+
+  /* --- Вывод --- */
+  .out {
+    margin-top: 16px; padding: 16px 18px;
+    background: var(--bg-soft); border-radius: 14px;
+    white-space: pre-wrap; word-break: break-word;
+    font-size: 15px; line-height: 1.6;
+    max-height: 44vh; overflow: auto;
+  }
+  .out:empty { display: none; }
+
+  .err {
+    margin-top: 14px; padding: 12px 15px; border-radius: 12px;
+    background: rgba(255,59,48,.12); color: #d70015; font-size: 14px;
+  }
+
+  footer {
+    border-top: 1px solid var(--line);
+    padding: 26px 22px 40px; text-align: center;
+    font-size: 12px; color: var(--text-soft);
+  }
+  footer a { color: var(--text-soft); }
+
+  @media (max-width: 520px) {
+    .hero { padding-top: 46px }
+    .sheet { max-height: 94vh; border-radius: 18px }
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="bar">
+    <span class="brand">Сервис студенческих работ</span>
+    <nav>
+      <button id="btn-settings">Настройки</button>
+      <button id="btn-retro">Ретро-режим</button>
+    </nav>
+  </div>
+</header>
+
+<section class="hero">
+  <h1>Курсовая работа,<br><span class="accent">собранная по науке</span></h1>
+  <p>Разбор темы опирается на реальные публикации, а не на догадки модели.
+     Анализ и план — бесплатно.</p>
+</section>
+
+<main class="grid" id="grid"></main>
+
+<footer>
+  Материалы сервиса — черновик для самостоятельной доработки, а не готовая
+  работа к сдаче. Проверяйте нормы, номера дел и цитаты по первоисточникам.
+</footer>
+
+<script src="app-core.js"></script>
+<script src="modern.js"></script>
+</body>
+</html>
