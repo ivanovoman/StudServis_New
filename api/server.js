@@ -4,9 +4,9 @@ const express = require('express');
 const path = require('path');
 const { STEP_PROMPTS } = require('./prompts');
 const { generateFragmentDocx, generateFullDocx } = require('./docxExport');
+const { resolveProviders, modelsFor } = require('./providers');
 
 const app = express();
-const key = process.env.OPENROUTER_API_KEY;
 app.use(express.json({ limit: '1mb' }));
 app.use(express.static(path.join(__dirname, '..', 'public')));
 
@@ -80,18 +80,8 @@ app.use('/api/v1', async (req, res) => {
 //   cohere/north-mini-code — код-модель; на прозу даёт нестабильный результат.
 //
 // Проверить актуальность списка: node scripts/check-models.js
-const MODEL = process.env.OPENROUTER_MODEL || 'minimax/minimax-m3:free';
-
-// Если основная модель недоступна, сервер перебирает эти по очереди.
-const FALLBACK_MODELS = [
-  'minimax/minimax-m3:free',
-  'minimax/minimax-m2.7:free',
-  'nvidia/nemotron-3-ultra-550b-a55b:free',
-  'dots-studio/dots-3-note-preview:free',
-  'poolside/laguna-s-2.1:free',
-];
-
-const OPENROUTER_URL = 'https://openrouter.ai/api/v1/chat/completions';
+// Список моделей и адреса эндпоинтов переехали в api/providers.js,
+// чтобы сервис не зависел от одного поставщика.
 
 /**
  * Собирает сообщения для запроса к модели.
@@ -121,70 +111,98 @@ function buildMessages(step, userInput, history = []) {
  * внезапно становится недоступна (что на OpenRouter случается часто).
  */
 async function callOpenRouterWithFallback(messages) {
-  const modelsToTry = [MODEL, ...FALLBACK_MODELS.filter(m => m !== MODEL)];
-  let lastError = null;
+  const providers = resolveProviders(process.env);
+
+  if (providers.length === 0) {
+    throw new Error(
+      'Не настроен ни один поставщик моделей. Откройте .env и задайте '
+      + 'ключ: OPENROUTER_API_KEY, либо GIGACHAT_AUTH_KEY, либо '
+      + 'CUSTOM_API_URL. Подробнее — docs/LLM_PROVIDERS.md'
+    );
+  }
+
+  // Копим по одной последней ошибке на поставщика. Если не выйдет
+  // совсем ничего, пользователь должен увидеть причину по каждому,
+  // а не только по тому, кого пробовали последним: иначе при связке
+  // «GigaChat + запасной OpenRouter» настоящая проблема с GigaChat
+  // остаётся невидимой.
+  const errors = new Map();
+  let fatal = false;
 
   // Бесплатные модели упираются в общий пул пачками: бывает, что все
-  // пять подряд отдают 429, а через пару секунд отвечают нормально.
+  // подряд отдают 429, а через пару секунд отвечают нормально.
   // Поэтому после полного круга ждём и пробуем ещё раз.
   const ROUNDS = 2;
   const PAUSE_MS = 2500;
-  let fatal = false;   // ошибка ключа: перебирать модели бессмысленно
 
   for (let round = 0; round < ROUNDS && !fatal; round++) {
-  if (round > 0) {
-    await new Promise(r => setTimeout(r, PAUSE_MS));
-  }
-  for (const model of modelsToTry) {
-    try {
-      const upstream = await fetch(OPENROUTER_URL, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${process.env.OPENROUTER_API_KEY}`,
-          'HTTP-Referer': process.env.PUBLIC_URL || 'http://localhost:3000',
-          'X-Title': 'Studservice',
-        },
-        body: JSON.stringify({
-          model,
-          messages,
-          stream: true,
-        }),
-      });
+    if (round > 0) {
+      await new Promise(r => setTimeout(r, PAUSE_MS));
+    }
 
-      if (upstream.ok && upstream.body) {
-        return { upstream, usedModel: model };
+    for (const provider of providers) {
+      const models = modelsFor(provider, process.env);
+
+      for (const model of models) {
+        try {
+          const upstream = await provider.stream(model, messages, process.env);
+
+          if (upstream.ok && upstream.body) {
+            return { upstream, usedModel: `${provider.title} · ${model}` };
+          }
+
+          const errText = await upstream.text().catch(() => '');
+          errors.set(provider.title,
+            `${model} — ${upstream.status} ${shortError(errText)}`);
+
+          // 401/403 — проблема с ключом этого поставщика, перебирать
+          // его модели дальше бессмысленно. Но у следующего поставщика
+          // ключ может быть в порядке, поэтому выходим только из
+          // цикла моделей.
+          if (upstream.status === 401 || upstream.status === 403) {
+            errors.set(provider.title,
+              `ключ отклонён (${upstream.status} ${shortError(errText)})`);
+            break;
+          }
+          // Всё остальное (404 модель убрали, 400 битый id, 429 упёрлись
+          // в лимит, 5xx сбой у провайдера) — повод взять следующую.
+        } catch (err) {
+          errors.set(provider.title, `${model} — ${err.message}`);
+        }
       }
-
-      const errText = await upstream.text().catch(() => '');
-      lastError = `(${upstream.status}) модель ${model}: ${errText.slice(0, 200)}`;
-
-      // 401/403 — проблема с ключом, перебор моделей не поможет.
-      // Всё остальное (404 модель убрали, 400 битый id, 429 упёрлись
-      // в лимит, 5xx сбой у провайдера) — повод взять следующую.
-      //
-      // 429 особенно важен: бесплатные модели постоянно упираются в
-      // общий пул, и раньше на этом весь запрос обрывался, хотя
-      // соседняя модель ответила бы сразу.
-      if (upstream.status === 401 || upstream.status === 403) {
-        fatal = true;
-        break;
-      }
-    } catch (err) {
-      lastError = `модель ${model}: ${err.message}`;
     }
   }
-  }
 
-  throw new Error(lastError || 'Все модели недоступны');
+  const report = [...errors.entries()]
+    .map(([title, msg]) => `${title}: ${msg}`)
+    .join('; ');
+  throw new Error(
+    (report || 'все модели недоступны')
+    + '. Если ключ отклонён — перевыпустите его; если исчерпан лимит — '
+    + 'подключите второго поставщика (docs/LLM_PROVIDERS.md)'
+  );
+}
+
+/** Достаёт человекочитаемое сообщение из ответа-ошибки провайдера. */
+function shortError(text) {
+  try {
+    const j = JSON.parse(text);
+    const msg = j.error?.message || j.message || j.error;
+    if (msg) return String(msg).slice(0, 160);
+  } catch { /* не JSON — вернём как есть */ }
+  return String(text).replace(/\s+/g, ' ').slice(0, 160);
 }
 
 
 app.post('/api/generate', async (req, res) => {
   const { step, input, history } = req.body;
 
-  if (!process.env.OPENROUTER_API_KEY) {
-    return res.status(500).json({ error: 'OPENROUTER_API_KEY не настроен на сервере' });
+  if (resolveProviders(process.env).length === 0) {
+    return res.status(500).json({
+      error: 'Не настроен ни один поставщик моделей. Задайте в .env '
+           + 'OPENROUTER_API_KEY, GIGACHAT_AUTH_KEY или CUSTOM_API_URL. '
+           + 'Подробнее — docs/LLM_PROVIDERS.md',
+    });
   }
 
   if (!step || !input) {
@@ -206,9 +224,7 @@ app.post('/api/generate', async (req, res) => {
 
   try {
     const { upstream, usedModel } = await callOpenRouterWithFallback(messages);
-    if (usedModel !== MODEL) {
-      console.log(`Основная модель недоступна, использована резервная: ${usedModel}`);
-    }
+    console.log(`Отвечает: ${usedModel}`);
 
     const reader = upstream.body.getReader();
     const decoder = new TextDecoder();
@@ -272,7 +288,19 @@ app.post('/api/generate', async (req, res) => {
 });
 
 app.get('/api/health', (req, res) => {
-  res.json({ ok: true, model: MODEL, hasKey: Boolean(process.env.OPENROUTER_API_KEY) });
+  // Показываем, какие поставщики реально настроены — это первое,
+  // что нужно знать, когда генерация перестала работать.
+  const providers = resolveProviders(process.env).map(p => ({
+    id: p.id,
+    title: p.title,
+    models: modelsFor(p, process.env),
+  }));
+  res.json({
+    ok: providers.length > 0,
+    providers,
+    hint: providers.length ? undefined
+      : 'Не настроен ни один поставщик. См. .env.example и docs/LLM_PROVIDERS.md',
+  });
 });
 
 // Скачивание текста с ЛЮБОГО шага протокола как .docx — план, введение,
