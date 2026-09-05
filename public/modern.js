@@ -262,10 +262,13 @@
   // ------------------------------------------------------- навигация
 
   document.getElementById('btn-retro').onclick = function () {
-    // Возврат к ретро: снимаем отметку и разрешаем заставку снова.
-    localStorage.removeItem('studservis_modern_ui');
-    sessionStorage.removeItem('studservis_intro_seen');
-    window.location.href = '/';
+    // Возврат к ретро - к случайной теме, как при обычном входе.
+    //
+    // Заставку при этом НЕ перезапускаем: она заканчивается переходом
+    // в современный интерфейс, и человек, который только что попросил
+    // ретро, оказался бы выброшен обратно. Отметку о просмотре
+    // оставляем на месте - в этой сессии вступление уже видели.
+    window.location.href = '/?intro=off';
   };
 
   document.getElementById('btn-settings').onclick = function () {

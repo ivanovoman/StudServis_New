@@ -13,6 +13,10 @@
  * с рабочей задачей, ждать анимацию никто не захочет. Отметка лежит в
  * sessionStorage, так что новая сессия снова покажет вступление.
  *
+ * Вход в сервис всегда идёт через случайную ретро-тему - это его лицо.
+ * Современный интерфейс открывается по итогу заставки или по прямому
+ * адресу /modern.html, но стартовой страницей не становится.
+ *
  * Пропустить можно в любой момент: Esc, кнопка «Пропустить», или
  * ?intro=off в адресе. Полностью выключить — ?intro=off,
  * принудительно повторить — ?intro=1.
@@ -21,7 +25,6 @@
   'use strict';
 
   var SEEN_KEY = 'studservis_intro_seen';
-  var MODERN_KEY = 'studservis_modern_ui';
 
   var params = new URLSearchParams(window.location.search);
   var force = params.get('intro') === '1';
@@ -294,7 +297,6 @@
     await wait(300);
 
     sessionStorage.setItem(SEEN_KEY, '1');
-    localStorage.setItem(MODERN_KEY, '1');
     window.location.href = '/modern.html';
   }
 

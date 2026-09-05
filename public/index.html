@@ -11,18 +11,11 @@
 </head>
 <body>
     <script>
-        // Кто уже прошёл заставку и «вернулся в будущее», попадает сразу
-        // в современный интерфейс: заставлять смотреть вступление на
-        // каждый заход — издевательство над постоянным пользователем.
-        // Вернуться в ретро можно кнопкой в шапке или ?retro=1.
+        // Вход всегда через случайную ретро-тему: это лицо сервиса и
+        // начало сценария «из прошлого в будущее». Современный
+        // интерфейс - то, куда приходят, а не то, с чего начинают,
+        // поэтому автоматических перенаправлений на него здесь нет.
         var params = new URLSearchParams(window.location.search);
-
-        if (params.get("retro") === "1") {
-            localStorage.removeItem("studservis_modern_ui");
-            sessionStorage.removeItem("studservis_intro_seen");
-        } else if (localStorage.getItem("studservis_modern_ui") === "1") {
-            window.location.replace("modern.html");
-        }
 
         // ?theme=Windows_95.html — открыть конкретную тему (для отладки)
         var requested = params.get("theme");
