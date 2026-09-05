@@ -56,8 +56,11 @@
    * Читает SSE-поток генерации.
    *
    * @param {object} opts
-   *   step    — идентификатор шага для бэкенда
-   *   input   — текст пользователя
+   *   step     — идентификатор шага для бэкенда
+   *   input    — текст пользователя
+   *   settings — настройки работы: тема, вуз, методичка, пожелания,
+   *              число глав. Без них модель не знает требований
+   *              заказчика и решает всё за него
    *   onDelta — очередной кусок текста
    *   onEvent — служебное событие: список источников или предупреждение
    *   onDone  — завершение; аргумент не пуст, если произошла ошибка
@@ -66,7 +69,11 @@
     fetch('/api/generate', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ step: opts.step, input: opts.input }),
+      body: JSON.stringify({
+        step: opts.step,
+        input: opts.input,
+        settings: opts.settings || {},
+      }),
     }).then(function (res) {
       if (!res.ok) {
         return res.json().then(function (j) {

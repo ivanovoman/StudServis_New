@@ -2,7 +2,7 @@
 require('dotenv').config();
 const express = require('express');
 const path = require('path');
-const { STEP_PROMPTS } = require('./prompts');
+const { STEP_PROMPTS, applyChapters } = require('./prompts');
 const { generateFragmentDocx, generateFullDocx } = require('./docxExport');
 const { resolveProviders, modelsFor } = require('./providers');
 
@@ -87,13 +87,61 @@ app.use('/api/v1', async (req, res) => {
  * Собирает сообщения для запроса к модели.
  * history — массив { role, content } из предыдущих шагов диалога (контекст).
  */
-function buildMessages(step, userInput, history = []) {
-  const systemPrompt = STEP_PROMPTS[step];
-  if (!systemPrompt) {
+/**
+ * Собирает требования пользователя в текст для модели.
+ *
+ * Настройки заполняются в окне «Настройки работы», но до сих пор
+ * никуда не отправлялись: в /api/generate уходили только шаг и текст.
+ * Пользователь заполнял вуз, методичку и пожелания, а генерация о них
+ * не знала - самая обидная разновидность поломки, потому что внешне
+ * всё работает.
+ */
+function buildBrief(s = {}) {
+  const parts = [];
+
+  if (s.topic) parts.push(`Тема работы: ${s.topic}`);
+  if (s.university) parts.push(`Учебное заведение: ${s.university}`);
+
+  if (s.chapters === 2 || s.chapters === 3) {
+    parts.push(`Число глав: ${s.chapters} (задано пользователем).`);
+  }
+
+  if (s.methodichka) {
+    // Методичка может быть длинной; в промпт идёт начало, где обычно
+    // и стоят требования к структуре и объёму.
+    const m = String(s.methodichka).slice(0, 4000);
+    parts.push(`Требования методички вуза (выполнять в первую очередь):\n${m}`);
+  }
+
+  if (s.wishes) {
+    parts.push(`Пожелания заказчика:\n${s.wishes}`);
+  }
+
+  if (!parts.length) return '';
+
+  return 'НАСТРОЙКИ РАБОТЫ, заданные пользователем.\n\n'
+    + parts.join('\n\n')
+    + '\n\nПри расхождении между этими требованиями и общими правилами '
+    + 'выше\nприоритет у методички и пожеланий: их задал заказчик.';
+}
+
+function buildMessages(step, userInput, history = [], settings = {}) {
+  const raw = STEP_PROMPTS[step];
+  if (!raw) {
     throw new Error(`Неизвестный шаг протокола: ${step}`);
   }
 
+  // Число глав приходит из настроек работы. Если не задано, модель
+  // выбирает сама между двумя и тремя - фиксировать тройку нельзя,
+  // курсовая бывает и двухглавой.
+  const systemPrompt = applyChapters(raw, settings.chapters);
+
   const messages = [{ role: 'system', content: systemPrompt }];
+
+  // Настройки работы - отдельным системным сообщением, чтобы модель
+  // считала их требованиями заказчика, а не частью текста задания.
+  const brief = buildBrief(settings);
+  if (brief) messages.push({ role: 'system', content: brief });
 
   // Добавляем контекст предыдущих шагов (например, план нужен на этапе написания введения)
   for (const turn of history) {
@@ -266,7 +314,7 @@ function shortError(text) {
 
 
 app.post('/api/generate', async (req, res) => {
-  const { step, input, history } = req.body;
+  const { step, input, history, settings } = req.body;
 
   if (resolveProviders(process.env).length === 0) {
     return res.status(500).json({
@@ -282,7 +330,7 @@ app.post('/api/generate', async (req, res) => {
 
   let messages;
   try {
-    messages = buildMessages(step, input, history || []);
+    messages = buildMessages(step, input, history || [], settings || {});
   } catch (e) {
     return res.status(400).json({ error: e.message });
   }

@@ -46,6 +46,10 @@
     university: '',
     methodichka: '',
     wishes: '',
+    // null - «решает модель по теме» (2 или 3). Жёстко фиксировать
+    // тройку нельзя: курсовая бывает и двухглавой, а методичка вуза
+    // может прямо требовать две.
+    chapters: null,
     sources: [],   // [{filename, chars, title}]
   };
 
@@ -259,7 +263,17 @@
     fetch('/api/generate', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ step: step, input: input }),
+      body: JSON.stringify({
+        step: step,
+        input: input,
+        settings: {
+          topic: settings.topic,
+          university: settings.university,
+          methodichka: settings.methodichka,
+          wishes: settings.wishes,
+          chapters: settings.chapters,
+        },
+      }),
     }).then(function (res) {
       if (!res.ok) {
         return res.json().then(function (j) { throw new Error(j.error || ('HTTP ' + res.status)); });
@@ -404,6 +418,27 @@
     uni.placeholder = 'Название вуза, кафедра';
     panel.appendChild(fieldRow('Учебное заведение', uni));
 
+    // Число глав: три варианта, «на усмотрение» по умолчанию.
+    var chapWrap = el('div', { display: 'flex', gap: '14px', alignItems: 'center' });
+    var chapRadios = [];
+    [['Решит сам по теме', ''], ['2 главы', '2'], ['3 главы', '3']]
+      .forEach(function (opt) {
+        var lab = el('label', {
+          display: 'flex', alignItems: 'center', gap: '5px',
+          fontSize: '13px', cursor: 'pointer',
+        });
+        var r = document.createElement('input');
+        r.type = 'radio';
+        r.name = 'chapters';
+        r.value = opt[1];
+        r.checked = String(settings.chapters || '') === opt[1];
+        chapRadios.push(r);
+        lab.appendChild(r);
+        lab.appendChild(el('span', {}, opt[0]));
+        chapWrap.appendChild(lab);
+      });
+    panel.appendChild(fieldRow('Число глав', chapWrap));
+
     var meth = textField(settings.methodichka, '60px');
     meth.placeholder = 'Вставьте текст методички или загрузите файл ниже';
     panel.appendChild(fieldRow('Методичка', meth));
@@ -479,6 +514,8 @@
       settings.university = uni.value.trim();
       settings.methodichka = meth.value.trim();
       settings.wishes = wishes.value.trim();
+      var picked = chapRadios.filter(function (r) { return r.checked; })[0];
+      settings.chapters = picked && picked.value ? Number(picked.value) : null;
       closeModal();
       if (onSaved) onSaved();
     };
