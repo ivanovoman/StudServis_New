@@ -1,0 +1,29 @@
+# Зависимости для запуска. Ставится так:
+#   pip install -r backend/requirements.txt
+#
+# Здесь только то, что нужно прямо сейчас. Пакеты для модулей, которые
+# ещё не написаны (Qdrant, Celery, ЮKassa, авторизация), вынесены в
+# requirements-future.txt — иначе первая же установка тянула бы torch
+# на два гигабайта ради кода, которого пока нет.
+
+# --- Core & API ---
+fastapi==0.115.6
+uvicorn[standard]==0.34.0
+pydantic==2.10.4
+pydantic-settings==2.7.0
+python-multipart==0.0.20
+PyYAML==6.0.2
+
+# --- HTTP клиент (OpenRouter, парсеры источников) ---
+httpx==0.28.1
+
+# --- Схема БД (модели описаны, подключение к Postgres ещё не нужно) ---
+sqlalchemy[asyncio]==2.0.36
+
+# --- Чтение и запись документов ---
+python-docx==1.1.2
+pypdf==5.1.0
+
+# --- Тесты ---
+pytest==8.3.4
+pytest-asyncio==0.25.0

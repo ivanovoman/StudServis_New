@@ -1,0 +1,328 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>СЕРВИС СТУДРАБОТ</title>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Share+Tech+Mono&display=swap');
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            background: #0a0a0a;
+            color: #ffb000;
+            font-family: 'Share Tech Mono', 'Courier New', monospace;
+            font-size: 14px;
+            min-height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            overflow: hidden;
+        }
+
+        .crt {
+            width: 950px;
+            height: 700px;
+            background: #0d0d0d;
+            border: 2px solid #333;
+            border-radius: 12px;
+            padding: 15px;
+            position: relative;
+            box-shadow: 0 0 40px rgba(255, 176, 0, 0.08), inset 0 0 80px rgba(0,0,0,0.5);
+        }
+
+        .crt::before {
+            content: '';
+            position: absolute;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background: repeating-linear-gradient(
+                0deg,
+                transparent,
+                transparent 2px,
+                rgba(0,0,0,0.15) 2px,
+                rgba(0,0,0,0.15) 4px
+            );
+            pointer-events: none;
+            z-index: 10;
+            border-radius: 12px;
+        }
+
+        .crt::after {
+            content: '';
+            position: absolute;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background: radial-gradient(ellipse at center, transparent 50%, rgba(0,0,0,0.4) 100%);
+            pointer-events: none;
+            z-index: 11;
+            border-radius: 12px;
+        }
+
+        .header-top {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 8px;
+            position: relative;
+            z-index: 20;
+        }
+
+        .logo-section {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .logo-svg {
+            width: 80px;
+            height: 50px;
+        }
+
+        .tagline {
+            font-size: 13px;
+            color: #ffcc00;
+            letter-spacing: 1px;
+            text-shadow: 0 0 6px rgba(255, 204, 0, 0.4);
+        }
+
+        .menu-bar {
+            display: flex;
+            gap: 20px;
+            font-size: 12px;
+        }
+
+        .menu-bar span {
+            cursor: pointer;
+            padding: 2px 6px;
+        }
+
+        .menu-bar span:hover {
+            background: #ffb000;
+            color: #0d0d0d;
+        }
+
+        .menu-bar .highlight {
+            color: #ffcc00;
+            font-weight: bold;
+        }
+
+        .main-container {
+            display: flex;
+            gap: 10px;
+            position: relative;
+            z-index: 20;
+            height: calc(100% - 150px);
+        }
+
+        .left-panel {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .file-panel {
+            background: #111;
+            border: 1px solid #2a2a2a;
+            padding: 8px;
+            font-size: 12px;
+            margin-bottom: 10px;
+        }
+
+        .file-panel .path {
+            color: #ffcc00;
+            margin-bottom: 5px;
+            border-bottom: 1px solid #333;
+            padding-bottom: 3px;
+        }
+
+        .file-panel .headers {
+            display: flex;
+            justify-content: space-between;
+            color: #888;
+            font-size: 11px;
+            margin-bottom: 5px;
+        }
+
+        .file-panel .row {
+            display: flex;
+            justify-content: space-between;
+            padding: 2px 0;
+        }
+
+        .file-panel .row:hover {
+            background: #ffb000;
+            color: #0d0d0d;
+        }
+
+        .menu-center {
+            flex: 2;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .menu-title {
+            font-size: 16px;
+            margin-bottom: 15px;
+            text-align: center;
+            letter-spacing: 2px;
+            text-shadow: 0 0 8px rgba(255, 176, 0, 0.6);
+        }
+
+        .menu-box {
+            border: 2px solid #ffb000;
+            padding: 20px;
+            width: 100%;
+            background: rgba(255, 176, 0, 0.03);
+        }
+
+        .menu-item {
+            padding: 8px 10px;
+            cursor: pointer;
+            transition: all 0.15s;
+            line-height: 1.6;
+            margin-bottom: 3px;
+        }
+
+        .menu-item:hover {
+            background: #ffb000;
+            color: #0d0d0d;
+            padding-left: 15px;
+        }
+
+        .menu-item .num {
+            color: #ff8800;
+            margin-right: 10px;
+            font-weight: bold;
+        }
+
+        .menu-item:hover .num {
+            color: #0d0d0d;
+        }
+
+        .controls {
+            text-align: center;
+            margin-top: 15px;
+            font-size: 13px;
+            letter-spacing: 1px;
+        }
+
+        .right-panel {
+            flex: 1;
+        }
+
+        .func-bar {
+            display: flex;
+            justify-content: space-between;
+            border-top: 1px solid #2a2a2a;
+            padding-top: 10px;
+            margin-top: 10px;
+            font-size: 11px;
+            color: #cc8800;
+            position: relative;
+            z-index: 20;
+        }
+
+        .func-bar span {
+            cursor: pointer;
+        }
+
+        .func-bar span:hover {
+            color: #ffb000;
+            text-shadow: 0 0 4px rgba(255, 176, 0, 0.5);
+        }
+    </style>
+</head>
+<body>
+    <div class="crt">
+        <!-- Header with Logo -->
+        <div class="header-top">
+            <div class="logo-section">
+                <svg class="logo-svg" viewBox="0 0 200 120" xmlns="http://www.w3.org/2000/svg">
+                    <path d="M 45,35 Q 30,35 25,50 Q 20,65 30,75 Q 40,85 55,80 Q 65,75 68,65 L 85,40 Q 90,32 95,30 L 92,25 Q 85,28 78,38 L 65,58 Q 63,65 55,68 Q 45,72 40,65 Q 35,58 38,48 Q 42,38 50,38 Q 58,38 62,45 L 67,42 Q 60,35 50,35 Z" 
+                          fill="#0047AB"/>
+                    <path d="M 110,30 L 115,30 Q 130,30 135,40 Q 140,50 135,58 Q 130,65 120,67 Q 135,70 140,80 Q 145,90 138,100 Q 130,110 115,110 L 110,110 L 110,30 Z M 115,35 L 115,63 L 125,63 Q 132,63 135,58 Q 138,53 135,48 Q 132,43 125,43 L 115,43 Z M 115,68 L 115,105 L 122,105 Q 130,105 133,100 Q 136,95 133,88 Q 130,82 122,82 L 115,82 Z" 
+                          fill="#E82626"/>
+                </svg>
+                <div class="tagline">Назад в будущее, вперед в прошлое: СЕРВИС СТУДРАБОТ</div>
+            </div>
+            <div class="menu-bar">
+                <span><span class="highlight">L</span>eft</span>
+                <span><span class="highlight">F</span>ile</span>
+                <span><span class="highlight">C</span>ommand</span>
+                <span><span class="highlight">O</span>ptions</span>
+                <span><span class="highlight">R</span>ight</span>
+                <span><span class="highlight">H</span>elp</span>
+            </div>
+        </div>
+
+        <!-- Main Content -->
+        <div class="main-container">
+            <div class="left-panel">
+                <div class="file-panel">
+                    <div class="path">C:\WORK\</div>
+                    <div class="headers">
+                        <span>Name</span>
+                        <span>Ext</span>
+                        <span>Size</span>
+                        <span>Date/Time</span>
+                    </div>
+                    <div class="row"><span>..</span><span>&lt;DIR&gt;</span><span></span><span>24-05-24</span></div>
+                    <div class="row"><span>DOC</span><span></span><span>12456</span><span>24-05-24</span></div>
+                    <div class="row"><span>README</span><span></span><span>1024</span><span>24-05-24</span></div>
+                </div>
+            </div>
+
+            <div class="menu-center">
+                <div class="menu-title">▓ ГЛАВНОЕ МЕНЮ ▓▓</div>
+                <div class="menu-box">
+                    <div class="menu-item"><span class="num">1.</span>Предоставить анализ проблемы (ядро исследования) - бесплатно</div>
+                    <div class="menu-item"><span class="num">2.</span>Сформировать план курсовой работы - бесплатно</div>
+                    <div class="menu-item"><span class="num">3.</span>Создать введение к курсовой работе (на основе плана)</div>
+                    <div class="menu-item"><span class="num">4.</span>СОЗДАТЬ КУРСОВУЮ РАБОТУ</div>
+                    <div class="menu-item"><span class="num">5.</span>Подобрать источники к курсовой работе</div>
+                    <div class="menu-item"><span class="num">6.</span>Отформатировать курсовую работу по ГОСТ</div>
+                    <div class="menu-item"><span class="num">7.</span>Проверить текст на ИИ (ИИ-детектор)</div>
+                    <div class="menu-item"><span class="num">8.</span>Написать речь (выступление) по работе</div>
+                    <div class="menu-item" data-action="settings"><span class="num">⚙</span>Настройки работы</div>
+                </div>
+                <div class="controls">[Enter] - Подтвердить&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;[Esc] - Отмена</div>
+            </div>
+
+            <div class="right-panel">
+                <div class="file-panel">
+                    <div class="path">C:\TEMP\</div>
+                    <div class="headers">
+                        <span>Name</span>
+                        <span>Ext</span>
+                        <span>Size</span>
+                        <span>Date/Time</span>
+                    </div>
+                    <div class="row"><span>..</span><span>&lt;DIR&gt;</span><span></span><span>24-05-24</span></div>
+                    <div class="row"><span>TXT</span><span></span><span>45</span><span>24-05-24</span></div>
+                </div>
+            </div>
+        </div>
+
+        <div class="func-bar">
+            <span>1 Help</span>
+            <span>2 User</span>
+            <span>3 View</span>
+            <span>4 Edit</span>
+            <span>5 Copy</span>
+            <span>6 RenMov</span>
+            <span>7 MkDir</span>
+            <span>8 Delete</span>
+            <span>9 PullDn</span>
+            <span>10 Quit</span>
+        </div>
+    </div>
+<script src="../app.js"></script>
+<script src="../intro.js"></script>
+</body>
+</html>

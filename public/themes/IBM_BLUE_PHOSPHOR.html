@@ -1,0 +1,267 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>СЕРВИС СТУДРАБОТ — IBM TERMINAL</title>
+
+<style>
+*{
+    margin:0;
+    padding:0;
+    box-sizing:border-box;
+}
+
+body{
+    background:#000;
+    font-family:"Courier New", monospace;
+    color:#4da3ff;
+    overflow:hidden;
+}
+
+/* CRT scanlines */
+.crt{
+    position:fixed;
+    inset:0;
+    background:linear-gradient(rgba(77,163,255,0.05) 50%, rgba(0,0,0,0.15) 50%);
+    background-size:100% 3px;
+    opacity:0.4;
+    pointer-events:none;
+}
+
+/* container */
+.screen{
+    max-width:1200px;
+    margin:0 auto;
+    padding:6px;
+}
+
+/* ===== TOP ===== */
+.top{
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    border:1px solid #4da3ff;
+    padding:6px;
+    margin-bottom:3px;
+}
+
+.logo img{
+    height:52px;
+    filter:brightness(1.2) contrast(1.2);
+}
+
+.slogan{
+    flex:1;
+    text-align:center;
+    font-weight:bold;
+    color:#4da3ff;
+    letter-spacing:0.5px;
+}
+
+/* ===== MENU BAR ===== */
+.menu{
+    border:1px solid #4da3ff;
+    padding:3px 6px;
+    margin-bottom:3px;
+    font-size:13px;
+    color:#4da3ff;
+}
+
+/* ===== INFO ===== */
+.info{
+    border:1px solid #4da3ff;
+    padding:3px 6px;
+    margin-bottom:3px;
+    display:flex;
+    justify-content:space-between;
+    font-size:12px;
+    color:#4da3ff;
+}
+
+/* ===== MAIN ===== */
+.main{
+    border:2px solid #4da3ff;
+    height:430px;
+    padding:8px;
+    position:relative;
+    background:#000;
+}
+
+/* ruler */
+.ruler{
+    font-size:11px;
+    border-bottom:1px solid #4da3ff;
+    margin-bottom:8px;
+    color:#4da3ff;
+}
+
+/* text */
+.text{
+    white-space:pre-wrap;
+    color:#4da3ff;
+    line-height:1.4;
+}
+
+/* cursor */
+.cursor{
+    display:inline-block;
+    width:8px;
+    height:14px;
+    background:#4da3ff;
+    animation:blink 1s infinite;
+}
+
+@keyframes blink{
+    50%{opacity:0;}
+}
+
+/* ===== POPUP MENU ===== */
+.popup{
+    position:absolute;
+    top:50%;
+    left:50%;
+    transform:translate(-50%,-50%);
+    background:#000;
+    border:2px solid #4da3ff;
+    min-width:420px;
+    padding:12px;
+    box-shadow:0 0 10px rgba(77,163,255,0.2);
+}
+
+.popup-title{
+    text-align:center;
+    margin-bottom:10px;
+    font-weight:bold;
+    color:#4da3ff;
+}
+
+/* MENU ITEMS (UNCHANGED TEXT) */
+.item{
+    padding:6px;
+    cursor:pointer;
+    color:#4da3ff;
+}
+
+.item:hover,
+.item.active{
+    background:#4da3ff;
+    color:#000;
+}
+
+/* hint */
+.hint{
+    margin-top:10px;
+    text-align:center;
+    font-size:11px;
+    color:#4da3ff;
+}
+
+/* ===== STATUS ===== */
+.status{
+    border:1px solid #4da3ff;
+    padding:3px 6px;
+    margin-top:3px;
+    display:flex;
+    justify-content:space-between;
+    font-size:12px;
+    color:#4da3ff;
+}
+
+/* ===== F KEYS ===== */
+.fkeys{
+    border:1px solid #4da3ff;
+    padding:3px 6px;
+    margin-top:3px;
+    display:flex;
+    justify-content:space-between;
+    font-size:12px;
+    color:#4da3ff;
+}
+</style>
+</head>
+
+<body>
+
+<div class="crt"></div>
+
+<div class="screen">
+
+    <!-- TOP -->
+    <div class="top">
+        <div class="logo">
+        </div>
+
+        <div class="slogan">
+            НАЗАД В БУДУЩЕЕ, ВПЕРЕД В ПРОШЛОЕ: СЕРВИС СТУДРАБОТ
+        </div>
+
+        <div style="width:120px"></div>
+    </div>
+
+    <!-- MENU -->
+    <div class="menu">
+        [IBM TERMINAL MODE]  FILE  COMMAND  OPTIONS  HELP
+    </div>
+
+    <!-- INFO -->
+    <div class="info">
+        <div>A:\STUDY\DOC.TXT</div>
+        <div>IBM MONOCHROME DISPLAY</div>
+    </div>
+
+    <!-- MAIN -->
+    <div class="main">
+
+        <div class="ruler">
+        10--------20--------30--------40--------50--------60--------70
+        </div>
+
+        <div class="text">
+IBM MONOCHROME TERMINAL ACTIVE
+SYSTEM READY
+BLUE PHOSPHOR MODE ENABLED
+
+<span class="cursor"></span>
+        </div>
+
+        <!-- POPUP MENU (UNCHANGED TEXT) -->
+        <div class="popup">
+            <div class="popup-title">ГЛАВНОЕ МЕНЮ</div>
+
+            <div class="item active">1. Предоставить анализ проблемы (ядро исследования) - бесплатно</div>
+            <div class="item">2. Сформировать план курсовой работы - бесплатно</div>
+            <div class="item">3. Создать введение к курсовой работе (на основе плана)</div>
+            <div class="item">4. СОЗДАТЬ КУРСОВУЮ РАБОТУ</div>
+            <div class="item">5. Подобрать источники к курсовой работе</div>
+            <div class="item">6. Отформатировать курсовую работу по ГОСТ</div>
+            <div class="item">7. Проверить текст на ИИ (ИИ-детектор)</div>
+            <div class="item">8. Написать речь (выступление) по работе</div>
+            <div class="item" data-action="settings">⚙ Настройки работы</div>
+
+            <div class="hint">
+                ENTER — SELECT │ ESC — EXIT
+            </div>
+        </div>
+
+    </div>
+
+    <!-- STATUS -->
+    <div class="status">
+        <div>MEM: 384K FREE</div>
+        <div>USER: STUDENT</div>
+    </div>
+
+    <!-- F KEYS -->
+    <div class="fkeys">
+        <div>F1 HELP</div>
+        <div>F2 VIEW</div>
+        <div>F10 EXIT</div>
+    </div>
+
+</div>
+
+<script src="../app.js"></script>
+<script src="../intro.js"></script>
+</body>
+</html>

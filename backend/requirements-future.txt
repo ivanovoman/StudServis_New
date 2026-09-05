@@ -1,0 +1,21 @@
+# Зависимости модулей, которые ещё не реализованы.
+# Ставить не нужно, пока соответствующий модуль не написан.
+
+# --- База данных: драйвер и миграции ---
+asyncpg==0.30.0
+alembic==1.14.0
+
+# --- Vector DB (RAG). sentence-transformers тянет torch, ~2 ГБ ---
+qdrant-client==1.12.2
+sentence-transformers==3.3.1
+
+# --- Очередь задач ---
+celery==5.4.0
+redis==5.2.1
+
+# --- Авторизация ---
+passlib[bcrypt]==1.7.4
+python-jose[cryptography]==3.3.0
+
+# --- Платежи ---
+yookassa==3.5.0

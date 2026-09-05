@@ -1,0 +1,263 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ATARI STUDWORK SYSTEM</title>
+
+<style>
+*{
+    margin:0;
+    padding:0;
+    box-sizing:border-box;
+}
+
+body{
+    background:#000066; /* Atari deep blue */
+    font-family:"Courier New", monospace;
+    color:#66ccff;
+}
+
+/* CRT scanlines */
+.crt{
+    position:fixed;
+    inset:0;
+    background:linear-gradient(rgba(102,204,255,0.04) 50%, rgba(0,0,0,0.15) 50%);
+    background-size:100% 3px;
+    opacity:0.35;
+    pointer-events:none;
+}
+
+/* container */
+.screen{
+    max-width:1200px;
+    margin:0 auto;
+    padding:10px;
+}
+
+/* ===== TOP ===== */
+.top{
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    border:2px solid #66ccff;
+    padding:6px;
+}
+
+.logo img{
+    height:50px;
+    filter:brightness(1.2);
+}
+
+.slogan{
+    flex:1;
+    text-align:center;
+    font-weight:bold;
+    color:#aaddff;
+    letter-spacing:0.5px;
+}
+
+/* ===== MENU ===== */
+.menu{
+    margin-top:4px;
+    border:2px solid #66ccff;
+    padding:4px;
+    color:#66ccff;
+}
+
+/* ===== INFO ===== */
+.info{
+    margin-top:4px;
+    border:2px solid #66ccff;
+    padding:4px;
+    display:flex;
+    justify-content:space-between;
+    font-size:12px;
+    color:#99ddff;
+}
+
+/* ===== MAIN ===== */
+.main{
+    margin-top:4px;
+    border:3px solid #66ccff;
+    height:430px;
+    padding:8px;
+    position:relative;
+}
+
+/* ruler */
+.ruler{
+    border-bottom:2px solid #66ccff;
+    margin-bottom:8px;
+    font-size:11px;
+    color:#66ccff;
+}
+
+/* text */
+.text{
+    white-space:pre-wrap;
+    color:#bfe9ff;
+    line-height:1.4;
+}
+
+/* cursor */
+.cursor{
+    display:inline-block;
+    width:8px;
+    height:14px;
+    background:#bfe9ff;
+    animation:blink 1s infinite;
+}
+
+@keyframes blink{
+    50%{opacity:0;}
+}
+
+/* ===== POPUP ===== */
+.popup{
+    position:absolute;
+    top:50%;
+    left:50%;
+    transform:translate(-50%,-50%);
+    background:#000044;
+    border:3px solid #66ccff;
+    min-width:420px;
+    padding:12px;
+}
+
+.popup-title{
+    text-align:center;
+    margin-bottom:10px;
+    font-weight:bold;
+    color:#aaddff;
+}
+
+/* MENU ITEMS (UNCHANGED TEXT) */
+.item{
+    padding:6px;
+    cursor:pointer;
+    color:#66ccff;
+}
+
+.item:hover,
+.item.active{
+    background:#66ccff;
+    color:#000066;
+}
+
+/* hint */
+.hint{
+    margin-top:10px;
+    text-align:center;
+    font-size:11px;
+    color:#99ddff;
+}
+
+/* ===== STATUS ===== */
+.status{
+    margin-top:4px;
+    border:2px solid #66ccff;
+    padding:4px;
+    display:flex;
+    justify-content:space-between;
+    font-size:12px;
+    color:#99ddff;
+}
+
+/* ===== F KEYS ===== */
+.fkeys{
+    margin-top:4px;
+    border:2px solid #66ccff;
+    padding:4px;
+    display:flex;
+    justify-content:space-between;
+    font-size:12px;
+    color:#aaddff;
+}
+</style>
+</head>
+
+<body>
+
+<div class="crt"></div>
+
+<div class="screen">
+
+    <!-- TOP -->
+    <div class="top">
+        <div class="logo">
+        </div>
+
+        <div class="slogan">
+            Назад в будущее, вперед в прошлое: СЕРВИС СТУДРАБОТ
+        </div>
+
+        <div style="width:120px"></div>
+    </div>
+
+    <!-- MENU -->
+    <div class="menu">
+        READY. LOAD STUDWORK SYSTEM
+    </div>
+
+    <!-- INFO -->
+    <div class="info">
+        <div>ATARI 800 XL MODE</div>
+        <div>GRAPHICS TEXT SYSTEM</div>
+    </div>
+
+    <!-- MAIN -->
+    <div class="main">
+
+        <div class="ruler">
+        --------------------------------------
+        </div>
+
+        <div class="text">
+ATARI SYSTEM ONLINE
+BLUE-GRAPHIC TERMINAL READY
+LOW RES MODE ACTIVE
+
+<span class="cursor"></span>
+        </div>
+
+        <!-- POPUP MENU -->
+        <div class="popup">
+            <div class="popup-title">MAIN MENU</div>
+
+            <div class="item active">1. Предоставить анализ проблемы (ядро исследования) - бесплатно</div>
+            <div class="item">2. Сформировать план курсовой работы - бесплатно</div>
+            <div class="item">3. Создать введение к курсовой работе (на основе плана)</div>
+            <div class="item">4. СОЗДАТЬ КУРСОВУЮ РАБОТУ</div>
+            <div class="item">5. Подобрать источники к курсовой работе</div>
+            <div class="item">6. Отформатировать курсовую работу по ГОСТ</div>
+            <div class="item">7. Проверить текст на ИИ (ИИ-детектор)</div>
+            <div class="item">8. Написать речь (выступление) по работе</div>
+            <div class="item" data-action="settings">⚙ Настройки работы</div>
+
+            <div class="hint">
+                PRESS START / ENTER
+            </div>
+        </div>
+
+    </div>
+
+    <!-- STATUS -->
+    <div class="status">
+        <div>READY</div>
+        <div>ATARI GRAPHICS MODE</div>
+    </div>
+
+    <!-- F KEYS -->
+    <div class="fkeys">
+        <div>F1 HELP</div>
+        <div>F5 RUN</div>
+        <div>F10 RESET</div>
+    </div>
+
+</div>
+
+<script src="../app.js"></script>
+<script src="../intro.js"></script>
+</body>
+</html>

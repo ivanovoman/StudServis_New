@@ -1,0 +1,268 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>СЕРВИС СТУДРАБОТ</title>
+
+<style>
+*{
+    margin:0;
+    padding:0;
+    box-sizing:border-box;
+}
+
+body{
+    background:#000;
+    font-family: Courier New, monospace;
+    overflow:hidden;
+    color:#00FF00;
+    display:flex;
+    justify-content:center;
+    align-items:center;
+    height:100vh;
+}
+
+/* CRT */
+.crt{
+    position:fixed;
+    inset:0;
+    background:linear-gradient(rgba(0,0,0,0) 50%, rgba(0,0,0,0.15) 50%);
+    background-size:100% 3px;
+    pointer-events:none;
+    opacity:0.4;
+}
+
+/* container like index2 */
+.editor{
+    width:100%;
+    max-width:1200px;
+    padding:5px;
+}
+
+/* ===== TOP ===== */
+.top{
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    border:1px solid #00AAAA;
+    padding:5px;
+    margin-bottom:3px;
+}
+
+.logo img{
+    height:55px;
+}
+
+.slogan{
+    flex:1;
+    text-align:center;
+    color:#00FFFF;
+    font-weight:bold;
+    font-size:14px;
+}
+
+/* ===== MENU BAR ===== */
+.menu{
+    background:#00AAAA;
+    color:#000;
+    font-weight:bold;
+    padding:2px 5px;
+    border:1px solid #00FFFF;
+    margin-bottom:3px;
+}
+
+/* ===== INFO ===== */
+.info{
+    display:flex;
+    justify-content:space-between;
+    color:#00FFFF;
+    border:1px solid #00AAAA;
+    padding:2px 5px;
+    font-size:13px;
+    margin-bottom:3px;
+}
+
+/* ===== MAIN ===== */
+.main{
+    border:2px solid #00AAAA;
+    height:420px;
+    padding:8px;
+    background:#000500;
+    position:relative;
+}
+
+/* ruler */
+.ruler{
+    color:#00AAAA;
+    border-bottom:1px solid #00AAAA;
+    margin-bottom:10px;
+    font-size:12px;
+}
+
+/* text */
+.text{
+    white-space:pre-wrap;
+    color:#00FF00;
+    line-height:1.4;
+}
+
+/* cursor */
+.cursor{
+    display:inline-block;
+    width:8px;
+    height:14px;
+    background:#00FF00;
+    animation:blink 1s infinite;
+}
+
+@keyframes blink{
+    50%{opacity:0;}
+}
+
+/* ===== NC POPUP ===== */
+.popup{
+    position:absolute;
+    top:50%;
+    left:50%;
+    transform:translate(-50%,-50%);
+    background:#000;
+    border:3px double #00AAAA;
+    min-width:420px;
+    padding:15px;
+    box-shadow:0 0 15px rgba(0,255,255,0.3);
+}
+
+.popup-title{
+    text-align:center;
+    color:#00FFFF;
+    margin-bottom:10px;
+    font-weight:bold;
+}
+
+.item{
+    padding:6px;
+    cursor:pointer;
+    color:#00FF00;
+}
+
+.item:hover,
+.item.active{
+    background:#00AAAA;
+    color:#000;
+}
+
+.hint{
+    margin-top:10px;
+    text-align:center;
+    color:#00FFFF;
+    font-size:12px;
+}
+
+/* ===== STATUS ===== */
+.status{
+    display:flex;
+    justify-content:space-between;
+    border:1px solid #00AAAA;
+    padding:3px 5px;
+    margin-top:3px;
+    color:#00FFFF;
+    font-size:12px;
+}
+
+/* ===== F KEYS ===== */
+.fkeys{
+    background:#00AAAA;
+    color:#000;
+    display:flex;
+    justify-content:space-between;
+    padding:3px;
+    margin-top:3px;
+    font-weight:bold;
+}
+</style>
+</head>
+
+<body>
+
+<div class="crt"></div>
+
+<div class="editor">
+
+    <!-- TOP -->
+    <div class="top">
+        <div class="logo">
+        </div>
+
+        <div class="slogan">
+            Назад в будущее, вперед в прошлое: СЕРВИС СТУДРАБОТ
+        </div>
+
+        <div style="width:120px"></div>
+    </div>
+
+    <!-- MENU -->
+    <div class="menu">
+        L File  C Command  O Options  R Right  H Help
+    </div>
+
+    <!-- INFO -->
+    <div class="info">
+        <div>3/18/1  B:\TEXT\Doc.txt</div>
+        <div>76%</div>
+    </div>
+
+    <!-- MAIN -->
+    <div class="main">
+
+        <div class="ruler">
+        │────10────│────20────│────30────│────40────│────50────│────60────│────70────│
+        </div>
+
+        <div class="text">
+Много що бачив цей кабінет...
+...текст редактора index2 стиль...
+<span class="cursor"></span>
+        </div>
+
+        <!-- NC MENU -->
+        <div class="popup">
+            <div class="popup-title">ГЛАВНОЕ МЕНЮ</div>
+
+            <div class="item active">1. Анализ темы</div>
+            <div class="item">2. План</div>
+            <div class="item">3. Введение</div>
+            <div class="item">4. Курсовая</div>
+            <div class="item">5. Источники</div>
+            <div class="item">6. ГОСТ</div>
+            <div class="item">7. ИИ анализ</div>
+            <div class="item">8. Речь по работе</div>
+            <div class="item" data-action="settings">⚙ Настройки работы</div>
+
+            <div class="hint">
+                Enter - выбрать | Esc - выход
+            </div>
+        </div>
+
+    </div>
+
+    <!-- STATUS -->
+    <div class="status">
+        <div>301+637 Kb | ЛИТ</div>
+        <div>28.2.2016</div>
+    </div>
+
+    <!-- F KEYS -->
+    <div class="fkeys">
+        <div>F1 Help</div>
+        <div>F2 View</div>
+        <div>F3 Edit</div>
+        <div>F10 Quit</div>
+    </div>
+
+</div>
+
+<script src="../app.js"></script>
+<script src="../intro.js"></script>
+</body>
+</html>

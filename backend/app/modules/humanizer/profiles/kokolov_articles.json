@@ -1,0 +1,30 @@
+{
+  "sentence_len_mean": 12.05,
+  "sentence_len_median": 10.0,
+  "sentence_len_stdev": 7.86,
+  "sentence_len_p10": 5.0,
+  "sentence_len_p90": 22.0,
+  "short_sentence_share": 0.306,
+  "long_sentence_share": 0.023,
+  "paragraph_len_mean": 131.57,
+  "paragraph_len_stdev": 77.82,
+  "law_refs_per_1k": 1.59,
+  "case_refs_per_1k": 1.52,
+  "money_per_1k": 2.69,
+  "year_per_1k": 3.86,
+  "percent_per_1k": 0.85,
+  "cliche_per_1k": 0.35,
+  "cliche_found": {
+    "таким образом": 4,
+    "важно понимать": 2,
+    "очевидно": 2,
+    "в целом": 1,
+    "в конечном итоге": 1
+  },
+  "avg_word_len": 6.25,
+  "lexical_diversity": 0.253,
+  "list_marker_share": 0.036,
+  "total_words": 28237,
+  "total_sentences": 2416,
+  "total_paragraphs": 224
+}
