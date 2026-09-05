@@ -610,3 +610,85 @@ class TestGenericWordTrap:
             sources=strong,
         )
         assert not any("релевантных" in p for p in check_grounding(a))
+
+
+class TestSearchEndpoint:
+    """`/sources/search` — поиск публикаций для этапа анализа.
+
+    Эндпоинт нужен Node-серверу: он забирает источники перед
+    генерацией и подставляет их в промпт, чтобы модель не
+    воспроизводила реквизиты по памяти.
+    """
+
+    @pytest.fixture
+    def client(self):
+        from fastapi.testclient import TestClient
+        from app.main import app
+        return TestClient(app)
+
+    def test_returns_sources_and_prompt_block(self, client, monkeypatch):
+        import app.modules.sources.api as api
+
+        async def fake_find(topic, directions, **kw):
+            return [src("Коллизии в гражданском праве", year=2024,
+                        doi="10/abc")]
+
+        monkeypatch.setattr(api, "find_sources", fake_find)
+
+        r = client.post("/api/v1/sources/search",
+                        json={"topic": "Коллизии в праве"})
+        assert r.status_code == 200
+        body = r.json()
+        assert body["count"] == 1
+        assert body["sources"][0]["title"] == "Коллизии в гражданском праве"
+        assert body["sources"][0]["year"] == 2024
+        # Блок для промпта должен быть готов к подстановке как есть.
+        assert "Коллизии в гражданском праве" in body["prompt_block"]
+
+    def test_empty_result_is_not_an_error(self, client, monkeypatch):
+        """Пустая выдача — обычный ответ, а не сбой.
+
+        Вызывающий сам решает, генерировать ли без опоры.
+        """
+        import app.modules.sources.api as api
+
+        async def nothing(topic, directions, **kw):
+            return []
+
+        monkeypatch.setattr(api, "find_sources", nothing)
+
+        r = client.post("/api/v1/sources/search", json={"topic": "тема"})
+        assert r.status_code == 200
+        assert r.json() == {"count": 0, "prompt_block": "", "sources": []}
+
+    def test_base_failure_reported_as_502(self, client, monkeypatch):
+        """Отказ внешней базы не должен выглядеть поломкой сервиса."""
+        import app.modules.sources.api as api
+
+        async def boom(topic, directions, **kw):
+            raise RuntimeError("OpenAlex недоступен")
+
+        monkeypatch.setattr(api, "find_sources", boom)
+
+        r = client.post("/api/v1/sources/search", json={"topic": "тема"})
+        assert r.status_code == 502
+        assert "OpenAlex недоступен" in r.json()["detail"]
+
+    def test_topic_falls_back_to_directions(self, client, monkeypatch):
+        """Без направлений поиска ищем по самой теме."""
+        import app.modules.sources.api as api
+        seen = {}
+
+        async def capture(topic, directions, **kw):
+            seen["directions"] = directions
+            return []
+
+        monkeypatch.setattr(api, "find_sources", capture)
+        client.post("/api/v1/sources/search", json={"topic": "Коллизии"})
+        assert seen["directions"] == ["Коллизии"]
+
+    def test_limit_is_capped(self, client):
+        """Слишком большой limit отклоняется, а не грузит базы."""
+        r = client.post("/api/v1/sources/search",
+                        json={"topic": "тема", "limit": 999})
+        assert r.status_code == 422

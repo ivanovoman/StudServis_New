@@ -14,6 +14,7 @@ from app.modules.documents.api import router as documents_router
 from app.modules.ai_engine.api import router as ai_router
 from app.modules.humanizer.api import router as humanizer_router
 from app.modules.projects.api import router as projects_router
+from app.modules.sources.api import router as sources_router
 
 logging.basicConfig(
     level=logging.DEBUG if settings.debug else logging.INFO,
@@ -39,6 +40,7 @@ app.include_router(documents_router, prefix=settings.api_prefix)
 app.include_router(projects_router, prefix=settings.api_prefix)
 app.include_router(humanizer_router, prefix=settings.api_prefix)
 app.include_router(ai_router, prefix=settings.api_prefix)
+app.include_router(sources_router, prefix=settings.api_prefix)
 
 
 @app.exception_handler(Exception)

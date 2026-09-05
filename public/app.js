@@ -119,6 +119,57 @@
     controls.appendChild(status);
     panel.appendChild(controls);
 
+    // Панель источников. Скрыта, пока их не нашли: на шагах без
+    // grounding она только занимала бы место.
+    var sourcesBox = el('div', {
+      display: 'none', fontSize: '12px', lineHeight: '1.45',
+      background: '#000', border: '1px solid #444', padding: '8px 10px',
+      maxHeight: '150px', overflow: 'auto',
+    });
+    panel.appendChild(sourcesBox);
+
+    // Показывает, на какие публикации опирается разбор. Пользователь
+    // должен видеть основания, а не доверять тексту на слово.
+    function renderSources(list) {
+      sourcesBox.textContent = '';
+      sourcesBox.style.display = '';
+      sourcesBox.style.borderColor = '#444';
+      sourcesBox.appendChild(el('div',
+        { fontWeight: 'bold', marginBottom: '6px' },
+        '▓ Опора: найдено публикаций — ' + list.length));
+
+      list.forEach(function (src, i) {
+        var row = el('div', { marginBottom: '5px' });
+        var head = (i + 1) + '. ' + src.title;
+        if (src.url) {
+          var a = el('a', { color: '#7fd0ff', textDecoration: 'underline' }, head);
+          a.href = src.url;
+          a.target = '_blank';
+          a.rel = 'noopener noreferrer';
+          row.appendChild(a);
+        } else {
+          row.appendChild(el('span', {}, head));
+        }
+        var meta = [];
+        if (src.year) meta.push(String(src.year));
+        if (src.provider) meta.push(src.provider);
+        if (src.has_fulltext) meta.push('полный текст');
+        if (src.doi) meta.push('DOI');
+        row.appendChild(el('div', { opacity: '0.65', paddingLeft: '14px' },
+          meta.join(' · ')));
+        sourcesBox.appendChild(row);
+      });
+    }
+
+    // Источников нет — говорим прямо, что текст держится только на
+    // памяти модели и требует проверки.
+    function renderNotice(text) {
+      sourcesBox.textContent = '';
+      sourcesBox.style.display = '';
+      sourcesBox.style.borderColor = '#a87f2a';
+      sourcesBox.appendChild(el('div', { color: '#ffcc66' }, '⚠ ' + text));
+    }
+
     var output = el('pre', {
       flex: '1', overflow: 'auto', whiteSpace: 'pre-wrap', wordBreak: 'break-word',
       background: '#000', border: '1px solid #444', padding: '10px', margin: '0',
@@ -145,11 +196,14 @@
       lastTopic = topic;
       lastResult = '';
       output.textContent = '';
+      sourcesBox.style.display = 'none';
+      sourcesBox.textContent = '';
       docxBtn.style.display = 'none';
-      status.textContent = 'Генерация…';
+      status.textContent = 'Ищу источники…';
       runBtn.disabled = true;
 
       streamGenerate(cfg.step, topic, function onDelta(delta) {
+        if (!lastResult) status.textContent = 'Генерация…';
         lastResult += delta;
         output.textContent = lastResult;
         output.scrollTop = output.scrollHeight;
@@ -162,6 +216,9 @@
           status.textContent = 'Готово';
           if (lastResult.trim()) docxBtn.style.display = '';
         }
+      }, function onEvent(ev) {
+        if (ev.sources) renderSources(ev.sources);
+        else if (ev.notice) renderNotice(ev.notice);
       });
     };
 
@@ -196,7 +253,9 @@
   }
 
   // Читает SSE-поток /api/generate и отдаёт кусочки текста в onDelta.
-  function streamGenerate(step, input, onDelta, onDone) {
+  // onEvent (необязателен) получает служебные сообщения: список
+  // найденных источников и предупреждения.
+  function streamGenerate(step, input, onDelta, onDone, onEvent) {
     fetch('/api/generate', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -224,6 +283,7 @@
               var parsed = JSON.parse(data);
               if (parsed.error) { onDone(parsed.error); return; }
               if (parsed.delta) onDelta(parsed.delta);
+              if (onEvent && (parsed.sources || parsed.notice)) onEvent(parsed);
             } catch (e) { /* пропускаем невалидные строки */ }
           }
           return pump();

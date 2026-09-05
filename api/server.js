@@ -104,6 +104,77 @@ function buildMessages(step, userInput, history = []) {
   return messages;
 }
 
+//: Шаги, которые опираются на реальные публикации. Анализ темы —
+//: фундамент: всё, что он напутает в нормах и делах, разойдётся по
+//: плану, введению и разделам.
+const GROUNDED_STEPS = new Set(['analysis']);
+
+/**
+ * Запрашивает у Python-бэкенда реальные публикации по теме.
+ *
+ * Зачем: без источников модель воспроизводит реквизиты по памяти и
+ * уверенно ошибается — приписывает статье чужой предмет, путает акт,
+ * в котором норма находится. Причём ошибается именно там, где не
+ * сомневается, так что пометки «нужно проверить» её не ловят.
+ *
+ * Возвращает null, если источников нет или бэкенд недоступен: анализ
+ * без опоры всё равно полезнее пустого экрана, просто он честно
+ * помечается как основанный на памяти модели.
+ */
+async function fetchSources(topic) {
+  const base = process.env.PY_BACKEND_URL || 'http://127.0.0.1:8000';
+  const timeout = Number(process.env.SOURCES_TIMEOUT_MS || 45000);
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeout);
+
+  try {
+    const r = await fetch(`${base}/api/v1/sources/search`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ topic, limit: 6 }),
+      signal: controller.signal,
+    });
+    if (!r.ok) return null;
+    const data = await r.json();
+    return data.count > 0 ? data : null;
+  } catch (err) {
+    // Внешние базы иногда молчат. Это не повод ронять генерацию.
+    console.warn('Поиск источников не удался:', err.message);
+    return null;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/**
+ * Врезает найденные публикации в запрос отдельным системным
+ * сообщением — перед пользовательским, чтобы модель считала их
+ * материалом, а не частью задания.
+ */
+function withSources(messages, sourcesData) {
+  if (!sourcesData) return messages;
+
+  const block = 'МАТЕРИАЛЫ ДЛЯ ОПОРЫ — реальные публикации, найденные '
+    + 'по теме.\n\n'
+    + sourcesData.prompt_block
+    + '\n\nКАК ИМИ ПОЛЬЗОВАТЬСЯ:\n'
+    + '- Это единственные источники, которые ты можешь считать '
+    + 'проверенными. Опирайся в первую очередь на них.\n'
+    + '- Ссылаясь на материал, указывай его номер в квадратных '
+    + 'скобках: [1], [3].\n'
+    + '- Реквизиты, которых в материалах нет (номера дел, статей, '
+    + 'постановлений), по-прежнему помечай как [нужно проверить: ...]. '
+    + 'Наличие материалов не разрешает воспроизводить остальное по '
+    + 'памяти.\n'
+    + '- Если материалы теме не отвечают, так и напиши, а не '
+    + 'подгоняй тезисы под них.';
+
+  // Системный промпт идёт первым, источники — сразу за ним.
+  return [messages[0], { role: 'system', content: block },
+          ...messages.slice(1)];
+}
+
 /**
  * Пытается выполнить запрос к OpenRouter, перебирая модели из списка,
  * пока одна из них не ответит успешно (статус 200 + поток данных).
@@ -223,6 +294,26 @@ app.post('/api/generate', async (req, res) => {
   res.flushHeaders();
 
   try {
+    // На анализе темы сначала ищем реальные публикации: этот шаг
+    // задаёт фактическую базу для всей работы, и ошибки в нём тянутся
+    // дальше по цепочке. Остальные шаги опираются на уже готовый
+    // анализ, который приходит в history.
+    if (GROUNDED_STEPS.has(step)) {
+      const found = await fetchSources(input);
+      if (found) {
+        messages = withSources(messages, found);
+        // Отдаём список в поток до текста: пользователь видит, на чём
+        // построен разбор, пока модель ещё печатает.
+        res.write(`data: ${JSON.stringify({ sources: found.sources })}\n\n`);
+        console.log(`Источников найдено: ${found.count}`);
+      } else {
+        res.write(`data: ${JSON.stringify({
+          notice: 'Источники найти не удалось — разбор построен на '
+                + 'знаниях модели. Реквизиты обязательно проверьте.',
+        })}\n\n`);
+      }
+    }
+
     const { upstream, usedModel } = await callOpenRouterWithFallback(messages);
     console.log(`Отвечает: ${usedModel}`);
 
