@@ -156,6 +156,43 @@ function buildMessages(step, userInput, history = [], settings = {}) {
 //: фундамент: всё, что он напутает в нормах и делах, разойдётся по
 //: плану, введению и разделам.
 const GROUNDED_STEPS = new Set(['analysis']);
+/**
+ * Сверить ссылки на статьи кодексов с оглавлениями первоисточников.
+ *
+ * Возвращает готовый текст справки либо null, если проверять нечего
+ * или правовые базы недоступны. Молчание здесь лучше ложной тревоги:
+ * «не удалось проверить» ничего не говорит пользователю о качестве
+ * текста, а место на экране занимает.
+ */
+async function verifyLegalRefs(text) {
+  const base = process.env.PY_BACKEND_URL || 'http://127.0.0.1:8000';
+
+  try {
+    const r = await fetch(`${base}/api/v1/sources/verify-legal`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text }),
+    });
+    if (!r.ok) return null;
+
+    const data = await r.json();
+    if (!data.checked) return null;
+
+    return data;
+  } catch {
+    // Бэкенд не поднят или базы не отвечают. Текст уже отдан
+    // пользователю, ломать выдачу из-за справки нельзя.
+    return null;
+  }
+}
+
+
+// Шаги, после которых сверяем ссылки на статьи кодексов с
+// первоисточником. План и введение модель пишет по памяти, и номера
+// статей там регулярно не те: разбор одного плана дал ссылку на ст. 4
+// ТК РФ как на коллизионную норму, хотя это запрещение принудительного
+// труда. Причём «проверить» модель пометила совсем другие места.
+const VERIFIED_STEPS = new Set(['plan', 'introduction', 'section_write']);
 
 /**
  * Запрашивает у Python-бэкенда реальные публикации по теме.
@@ -373,6 +410,9 @@ app.post('/api/generate', async (req, res) => {
     // ни одного content-токена. Раньше это выглядело как «нажал и
     // ничего не произошло» — хуже явной ошибки.
     let sentAny = false;
+    // Копим текст целиком: ссылки на статьи проверяются по готовому
+    // ответу, в потоке «ст. 4 ТК РФ» может приехать пятью кусками.
+    let fullText = '';
 
     while (true) {
       const { done, value } = await reader.read();
@@ -402,6 +442,7 @@ app.post('/api/generate', async (req, res) => {
             || '';
           if (delta) {
             sentAny = true;
+            fullText += delta;
             // Пробрасываем кусочек текста клиенту как есть
             res.write(`data: ${JSON.stringify({ delta })}\n\n`);
           }
@@ -416,6 +457,18 @@ app.post('/api/generate', async (req, res) => {
         error: `модель ${usedModel} вернула пустой ответ. `
              + 'Нажмите «Выполнить» ещё раз — запрос уйдёт на другую модель.',
       })}\n\n`);
+    }
+
+    // Текст готов — сверяем ссылки на нормы. Именно после генерации, а
+    // не до: проверка ходит в правовые базы, и задерживать из-за неё
+    // начало вывода нельзя.
+    if (sentAny && VERIFIED_STEPS.has(step)) {
+      const check = await verifyLegalRefs(fullText);
+      if (check) {
+        res.write(`data: ${JSON.stringify({ legal: check })}\n\n`);
+        console.log(`Ссылок на статьи: ${check.checked}, `
+                  + `расхождений: ${check.problems}`);
+      }
     }
 
     res.end();

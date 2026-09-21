@@ -174,12 +174,61 @@
       sourcesBox.appendChild(el('div', { color: '#ffcc66' }, '⚠ ' + text));
     }
 
+    // Справка по ссылкам на статьи кодексов. Показывается под текстом
+    // после генерации: модель пишет номера статей по памяти и
+    // ошибается, а выглядят такие ошибки убедительно.
+    function renderLegal(check) {
+      var box = el('div', {
+        marginTop: '8px', padding: '8px', border: '1px solid #444',
+        fontSize: '12px', lineHeight: '1.45', maxHeight: '160px',
+        overflow: 'auto',
+      });
+
+      var bad = (check.references || []).filter(function (r) {
+        return r.status === 'mismatch' || r.status === 'missing';
+      });
+      var listed = (check.references || []).filter(function (r) {
+        return r.status === 'listed';
+      });
+
+      box.style.borderColor = bad.length ? '#c0392b' : '#3a6b3a';
+      box.appendChild(el('div', {
+        fontWeight: 'bold', marginBottom: '5px',
+        color: bad.length ? '#ff8080' : '#8fd18f',
+      }, bad.length
+          ? '⚠ Ссылки на статьи: расхождений ' + bad.length
+          : '✓ Ссылки на статьи проверены: ' + check.checked));
+
+      bad.forEach(function (r) {
+        box.appendChild(el('div', { color: '#ff9999', marginBottom: '3px' },
+          '• ' + r.label + ' — ' + r.note));
+      });
+
+      if (listed.length) {
+        box.appendChild(el('div', {
+          opacity: '0.75', marginTop: bad.length ? '6px' : '0',
+        }, 'Перечислены без пояснений, сверьте сами:'));
+        listed.forEach(function (r) {
+          box.appendChild(el('div', { opacity: '0.75' },
+            '• ' + r.label + ' — «' + r.real_title + '»'));
+        });
+      }
+
+      legalBox.textContent = '';
+      legalBox.style.display = '';
+      legalBox.appendChild(box);
+    }
+
     var output = el('pre', {
       flex: '1', overflow: 'auto', whiteSpace: 'pre-wrap', wordBreak: 'break-word',
       background: '#000', border: '1px solid #444', padding: '10px', margin: '0',
       minHeight: '180px', fontFamily: FONT, fontSize: '13px', lineHeight: '1.5',
     });
     panel.appendChild(output);
+
+    var legalBox = el('div', { display: 'none' });
+    panel.appendChild(legalBox);
+
     panel.appendChild(el('div', { fontSize: '11px', opacity: '0.6', textAlign: 'center' },
       '[Esc] — закрыть окно'));
 
@@ -202,6 +251,8 @@
       output.textContent = '';
       sourcesBox.style.display = 'none';
       sourcesBox.textContent = '';
+      legalBox.style.display = 'none';
+      legalBox.textContent = '';
       docxBtn.style.display = 'none';
       status.textContent = 'Ищу источники…';
       runBtn.disabled = true;
@@ -223,6 +274,7 @@
       }, function onEvent(ev) {
         if (ev.sources) renderSources(ev.sources);
         else if (ev.notice) renderNotice(ev.notice);
+        else if (ev.legal) renderLegal(ev.legal);
       });
     };
 
@@ -297,7 +349,10 @@
               var parsed = JSON.parse(data);
               if (parsed.error) { onDone(parsed.error); return; }
               if (parsed.delta) onDelta(parsed.delta);
-              if (onEvent && (parsed.sources || parsed.notice)) onEvent(parsed);
+              if (onEvent
+                  && (parsed.sources || parsed.notice || parsed.legal)) {
+                onEvent(parsed);
+              }
             } catch (e) { /* пропускаем невалидные строки */ }
           }
           return pump();

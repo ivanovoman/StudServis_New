@@ -19,6 +19,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
 from app.modules.sources.grounding import format_sources_for_prompt
+from app.modules.sources.legal_refs import check_text
 from app.modules.sources.registry import find_sources
 
 router = APIRouter(prefix="/sources", tags=["sources"])
@@ -85,5 +86,46 @@ async def search_sources(payload: SearchIn) -> dict:
                 "has_fulltext": bool(s.fulltext),
             }
             for s in sources
+        ],
+    }
+
+
+class VerifyIn(BaseModel):
+    """Текст, в котором нужно проверить ссылки на статьи кодексов."""
+
+    text: str = Field(min_length=1, max_length=200_000)
+
+
+@router.post("/verify-legal")
+async def verify_legal(payload: VerifyIn) -> dict:
+    """Сверить ссылки на статьи кодексов с оглавлениями первоисточников.
+
+    Отдельный эндпоинт, а не часть генерации, по двум причинам. Проверять
+    нужно и то, что модель написала сама, и то, что пользователь принёс
+    со стороны. И проверка ходит в правовые базы — это секунды, которые
+    нельзя вешать на поток генерации: пользователь ждёт текст, а не
+    справку.
+
+    Ответ намеренно не содержит вердикта «ложь». Машина отвечает на
+    проверяемый вопрос — существует ли статья и как она называется, —
+    а сопоставление с замыслом остаётся за человеком.
+    """
+    result = await check_text(payload.text)
+
+    return {
+        "checked": len(result.references),
+        "problems": len(result.suspicious),
+        "summary": result.summary(),
+        "references": [
+            {
+                "code": r.code,
+                "article": r.article,
+                "label": r.label,
+                "status": r.status,
+                "real_title": r.real_title,
+                "note": r.note,
+                "claim": r.claim,
+            }
+            for r in result.references
         ],
     }
