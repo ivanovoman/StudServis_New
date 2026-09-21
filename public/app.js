@@ -25,9 +25,12 @@
          placeholder: 'Вставьте план работы…',
          needsSettings: true },
     4: null,   // «Создать курсовую» — сборка из нескольких шагов, отдельная задача
-    5: null,   // «Источники» — ждёт эндпоинта подбора на бэкенде
-    6: null,   // «ГОСТ» — оформление документа
-    7: null,   // «Проверка на ИИ» — есть в Python-бэкенде, не подключено к Node
+    // Пункты 5-7 не генерируют текст, а обрабатывают готовый, поэтому
+    // идут не через SSE, а обычным запросом к Python-бэкенду. Тема в
+    // настройках им не нужна — отсюда tool: true и отсутствие step.
+    5: { tool: 'sources', title: 'ПОДБОР ИСТОЧНИКОВ', needsSettings: true },
+    6: { tool: 'gost', title: 'ОФОРМЛЕНИЕ ПО ГОСТ' },
+    7: { tool: 'detector', title: 'ПРОВЕРКА НА ИИ' },
     8: { step: 'speech', title: 'РЕЧЬ ПО РАБОТЕ', docTitle: 'Речь для защиты',
          placeholder: 'Вставьте текст готовой работы…',
          needsSettings: true },
@@ -605,6 +608,15 @@
       node.style.cursor = 'pointer';
       node.addEventListener('click', function () {
         if (!cfg) { openStub(num); return; }
+        // Инструменты работают с готовым текстом, у них своё окно.
+        if (cfg.tool) {
+          if (cfg.needsSettings && !settingsFilled()) {
+            openSettings(function () { openTool(cfg); });
+            return;
+          }
+          openTool(cfg);
+          return;
+        }
         // Шаги, которые пишут текст, без темы работать не могут:
         // сначала настройки, потом сам шаг.
         if (cfg.needsSettings && !settingsFilled()) {
@@ -631,6 +643,23 @@
     btn.title = enabled
       ? 'Тема, методичка, пожелания и свои источники'
       : 'Для этого пункта настройки не нужны';
+  }
+
+  // Инструменты (пункты 5-7) живут в tools.js: они не генерируют текст,
+  // а обрабатывают готовый, и общего с конвейером у них мало.
+  // Наружу отдаём настройки и закрытие окна, чтобы окна не наслаивались.
+  window.StudTools = {
+    getSettings: function () { return settings; },
+    closeModal: closeModal,
+  };
+
+  function openTool(cfg) {
+    if (!window.StudToolsUI) {
+      openStub(0);
+      return;
+    }
+    closeModal();
+    window.StudToolsUI.openTool(cfg);
   }
 
   function openStub(num) {
