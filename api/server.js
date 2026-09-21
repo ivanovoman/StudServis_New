@@ -3,6 +3,8 @@ require('dotenv').config();
 const express = require('express');
 const path = require('path');
 const { STEP_PROMPTS, applyChapters } = require('./prompts');
+const { parseOutline, buildQueue } = require('./outline');
+const { fixHybrids } = require('./textfix');
 const { generateFragmentDocx, generateFullDocx } = require('./docxExport');
 const { resolveProviders, modelsFor } = require('./providers');
 
@@ -479,6 +481,191 @@ app.post('/api/generate', async (req, res) => {
   }
 });
 
+/**
+ * Сборка всей работы по готовому плану (пункт 4 меню).
+ *
+ * Отличается от остальных шагов тем, что это не один запрос к модели, а
+ * десяток: введение, каждый раздел по очереди, заключение. На плане из
+ * трёх глав по три раздела выходит одиннадцать обращений и минут
+ * пятнадцать ожидания.
+ *
+ * Отсюда три решения. Первое - прогресс идёт в поток по мере готовности
+ * каждого куска, а не одним пакетом в конце: пользователь должен видеть,
+ * что работа движется. Второе - написанные разделы копятся и передаются
+ * модели как контекст, иначе третий раздел пересказывает первый. Третье -
+ * отказ на одном разделе не роняет сборку: раздел помечается и работа
+ * идёт дальше, дописать один кусок проще, чем начинать всё заново.
+ */
+app.post('/api/assemble', async (req, res) => {
+  const { plan, settings } = req.body || {};
+
+  if (!plan || String(plan).trim().length < 100) {
+    return res.status(400).json({
+      error: 'Нужен план работы. Сначала выполните пункт 2.',
+    });
+  }
+
+  const outline = parseOutline(plan);
+  if (!outline.chapters.length) {
+    return res.status(400).json({
+      error: 'В плане не нашлось глав. Проверьте, что вставлен план '
+           + 'работы, а не анализ темы.',
+    });
+  }
+
+  const queue = buildQueue(outline);
+
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Connection', 'keep-alive');
+  res.flushHeaders();
+
+  const send = (obj) => res.write(`data: ${JSON.stringify(obj)}\n\n`);
+
+  // Сразу отдаём структуру: пользователь видит, что именно будет
+  // написано и сколько это шагов, до начала долгого ожидания.
+  send({
+    outline: outline.chapters.map((c) => ({
+      number: c.number,
+      title: c.title,
+      sections: c.sections.map((s) => ({ number: s.number, title: s.title })),
+    })),
+    warnings: outline.warnings,
+    total: queue.length,
+  });
+
+  const done = [];      // готовые куски
+  const failed = [];    // что не получилось
+  let aborted = false;
+
+  // Слушать надо ОТВЕТ, а не запрос. У req событие close срабатывает,
+  // как только прочитано тело - то есть сразу, ещё до первого куска.
+  // С подпиской на req сборка тихо останавливалась после первой части:
+  // ошибки нет, поток просто закрывался. Уход клиента виден по res.
+  res.on('close', () => { aborted = true; });
+
+  for (let i = 0; i < queue.length; i += 1) {
+    if (aborted) break;
+
+    const task = queue[i];
+    send({ progress: { index: i + 1, total: queue.length, title: task.heading || task.title } });
+
+    try {
+      const raw = await writePiece(task, { plan, settings, done });
+
+      // Модель изредка мешает латиницу с кириллицей внутри слова
+      // («kompetенции»). В готовой работе это брак, а глазами такое
+      // почти не видно - чиним и показываем, что именно поправили.
+      const { text, fixed } = fixHybrids(raw);
+      done.push({ task, text });
+      send({
+        piece: {
+          kind: task.kind,
+          number: task.number || null,
+          heading: task.heading || task.title,
+          text,
+          chars: text.replace(/\s/g, '').length,
+          fixed: fixed.length ? fixed : undefined,
+        },
+      });
+    } catch (e) {
+      failed.push({ heading: task.heading || task.title, reason: e.message });
+      send({
+        failed: { heading: task.heading || task.title, reason: e.message },
+      });
+    }
+  }
+
+  if (!aborted) {
+    send({ finished: { written: done.length, failed: failed.length } });
+    res.write('data: [DONE]\n\n');
+  }
+  res.end();
+});
+
+/**
+ * Написать один кусок работы: введение, раздел или заключение.
+ *
+ * Готовые куски передаются в сжатом виде - только заголовки и первые
+ * строки. Целиком они не влезут в контекст к середине работы, а для
+ * борьбы с повторами достаточно знать, о чём уже сказано.
+ */
+async function writePiece(task, ctx) {
+  const { plan, settings, done } = ctx;
+
+  const stepName = task.kind === 'section' ? 'section_write' : task.kind;
+  const raw = STEP_PROMPTS[stepName];
+  if (!raw) throw new Error(`нет промпта для шага ${stepName}`);
+
+  const messages = [
+    { role: 'system', content: applyChapters(raw, settings && settings.chapters) },
+  ];
+
+  const brief = buildBrief(settings || {});
+  if (brief) messages.push({ role: 'system', content: brief });
+
+  // План целиком нужен всегда: из него видно место куска в работе.
+  messages.push({
+    role: 'system',
+    content: `ПЛАН ВСЕЙ РАБОТЫ (для ориентира):\n\n${String(plan).slice(0, 12000)}`,
+  });
+
+  if (done.length) {
+    const written = done.map((d) => {
+      const head = d.task.heading || d.task.title;
+      return `${head}\n${d.text.slice(0, 400)}...`;
+    }).join('\n\n');
+    messages.push({
+      role: 'system',
+      content: 'УЖЕ НАПИСАНО (не повторяй эти мысли и формулировки, '
+             + `двигай работу дальше):\n\n${written.slice(0, 8000)}`,
+    });
+  }
+
+  let user;
+  if (task.kind === 'section') {
+    user = `Напиши раздел ${task.heading}.`;
+    if (task.chapterTitle) user += `\nОн входит в главу «${task.chapterTitle}».`;
+    if (task.brief) user += `\n\nПлан этого раздела:\n${task.brief}`;
+  } else if (task.kind === 'introduction') {
+    user = 'Напиши введение к работе по плану выше.';
+  } else {
+    user = 'Напиши заключение работы по плану выше и написанным разделам.';
+  }
+  messages.push({ role: 'user', content: user });
+
+  const { upstream } = await callOpenRouterWithFallback(messages);
+
+  // Ответ читаем целиком: поток здесь не нужен, наружу уходит готовый
+  // кусок, а прогресс показывается по кускам, а не по буквам.
+  const reader = upstream.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+  let text = '';
+
+  while (true) {
+    const { done: finished, value } = await reader.read();
+    if (finished) break;
+    buffer += decoder.decode(value, { stream: true });
+    const lines = buffer.split('\n');
+    buffer = lines.pop();
+    for (const line of lines) {
+      const t = line.trim();
+      if (!t.startsWith('data:')) continue;
+      const payload = t.slice(5).trim();
+      if (payload === '[DONE]') continue;
+      try {
+        const parsed = JSON.parse(payload);
+        const choice = parsed.choices?.[0];
+        text += choice?.delta?.content || choice?.delta?.reasoning_content || '';
+      } catch { /* keep-alive и прочий мусор */ }
+    }
+  }
+
+  if (!text.trim()) throw new Error('модель вернула пустой ответ');
+  return text.trim();
+}
+
 app.get('/api/health', (req, res) => {
   // Показываем, какие поставщики реально настроены — это первое,
   // что нужно знать, когда генерация перестала работать.
@@ -546,7 +733,20 @@ app.post('/api/export-docx-full', async (req, res) => {
 
 const PORT = process.env.PORT || 3000;
 if (require.main === module) {
-  app.listen(PORT, () => console.log(`Студсервис запущен на http://localhost:${PORT}`));
+  const server = app.listen(PORT,
+    () => console.log(`Студсервис запущен на http://localhost:${PORT}`));
+
+  // Node по умолчанию обрывает запрос через 5 минут (requestTimeout =
+  // 300000 мс). Для обычных шагов это незаметно, но сборка работы идёт
+  // десятком запросов к модели подряд и легко занимает полчаса, а
+  // генерация плана на длинном входе упиралась в ровно 303 секунды и
+  // падала с «terminated». Снимаем ограничение на время запроса и
+  // оставляем щедрый keep-alive: поток SSE должен жить, пока идёт
+  // работа.
+  server.requestTimeout = 0;          // без предела на длительность
+  server.headersTimeout = 120000;     // но заголовки обязаны прийти быстро
+  server.keepAliveTimeout = 120000;
+  server.timeout = 0;
 }
 
 module.exports = app;

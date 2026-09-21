@@ -24,7 +24,9 @@
     3: { step: 'introduction', title: 'ВВЕДЕНИЕ', docTitle: 'Введение',
          placeholder: 'Вставьте план работы…',
          needsSettings: true },
-    4: null,   // «Создать курсовую» — сборка из нескольких шагов, отдельная задача
+    // Сборка всей работы: свой обработчик, потому что это не один
+    // запрос, а очередь из десятка. Живёт в assemble.js.
+    4: { assemble: true, title: 'СБОРКА КУРСОВОЙ', needsSettings: true },
     // Пункты 5-7 не генерируют текст, а обрабатывают готовый, поэтому
     // идут не через SSE, а обычным запросом к Python-бэкенду. Тема в
     // настройках им не нужна — отсюда tool: true и отсутствие step.
@@ -608,6 +610,15 @@
       node.style.cursor = 'pointer';
       node.addEventListener('click', function () {
         if (!cfg) { openStub(num); return; }
+        // Сборка работы — отдельное окно с прогрессом по частям.
+        if (cfg.assemble) {
+          if (!settingsFilled()) {
+            openSettings(function () { openAssembleWindow(); });
+            return;
+          }
+          openAssembleWindow();
+          return;
+        }
         // Инструменты работают с готовым текстом, у них своё окно.
         if (cfg.tool) {
           if (cfg.needsSettings && !settingsFilled()) {
@@ -652,6 +663,12 @@
     getSettings: function () { return settings; },
     closeModal: closeModal,
   };
+
+  function openAssembleWindow() {
+    if (!window.StudAssemble) { openStub(4); return; }
+    closeModal();
+    window.StudAssemble.openAssemble();
+  }
 
   function openTool(cfg) {
     if (!window.StudToolsUI) {
