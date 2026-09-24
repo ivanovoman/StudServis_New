@@ -638,7 +638,39 @@
       });
     });
 
+    addWorksButton();
     highlightSettingsButton();
+  }
+
+  /**
+   * Кнопка «Мои работы».
+   *
+   * Добавляется из кода, а не в разметку каждой темы: тем шестнадцать,
+   * и держать в них одинаковый пункт вручную — гарантированный источник
+   * расхождений. Клонируем кнопку настроек, чтобы унаследовать её вид в
+   * текущей теме, и меняем только текст и обработчик.
+   */
+  function addWorksButton() {
+    if (document.querySelector('[data-action="works"]')) return;
+
+    var settingsBtn = document.querySelector('[data-action="settings"]');
+    if (!settingsBtn || !settingsBtn.parentNode) return;
+
+    var btn = settingsBtn.cloneNode(false);
+    btn.setAttribute('data-action', 'works');
+    btn.textContent = '🗂 Мои работы';
+    btn.style.cursor = 'pointer';
+    btn.title = 'Работы сохраняются автоматически во время сборки';
+
+    btn.addEventListener('click', function () {
+      if (!window.StudWorks) {
+        alert('Хранение работ недоступно: не загрузился works.js');
+        return;
+      }
+      window.StudWorks.openWorks();
+    });
+
+    settingsBtn.parentNode.insertBefore(btn, settingsBtn.nextSibling);
   }
 
   // Кнопка настроек тускнеет, когда активный пункт в них не нуждается.

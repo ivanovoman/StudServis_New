@@ -110,6 +110,13 @@
     barWrap.appendChild(bar);
     panel.appendChild(barWrap);
 
+    // Отдельная строка про сохранение: в общий статус её класть нельзя,
+    // он всё время перерисовывается ходом сборки.
+    var savedNote = el('div', {
+      fontSize: '11px', opacity: '0.75', color: '#8fbf8f',
+    }, '');
+    panel.appendChild(savedNote);
+
     var out = el('div', {
       flex: '1', overflow: 'auto', background: '#000',
       border: '1px solid #444', padding: '10px', fontSize: '13px',
@@ -159,7 +166,13 @@
       fetch('/api/assemble', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ plan: plan, settings: settings }),
+        // Ключ устройства нужен, чтобы сервер сохранял работу по
+        // частям: закрытая вкладка больше не стоит двух минут сборки.
+        body: JSON.stringify({
+          plan: plan,
+          settings: settings,
+          ownerKey: window.StudWorks ? window.StudWorks.ownerKey() : ''
+        }),
       })
         .then(function (resp) {
           if (!resp.ok) {
@@ -211,6 +224,12 @@
         status.textContent = 'Пишу ' + p.index + ' из ' + p.total
                            + ': ' + p.title;
         bar.style.width = Math.round((p.index - 1) / p.total * 100) + '%';
+      }
+      if (ev.saved) {
+        // Пользователь должен видеть, что закрывать вкладку уже не
+        // страшно — иначе он сидит и ждёт из страха потерять текст.
+        savedNote.textContent = 'Работа сохраняется — её можно будет '
+          + 'открыть в «Моих работах», даже если закрыть вкладку.';
       }
       if (ev.expanding) {
         // Дописывание занимает столько же, сколько сам раздел. Без

@@ -26,6 +26,9 @@ app.use('/api/v1', async (req, res) => {
   const target = PY_BACKEND + '/api/v1' + req.url;
   const headers = {};
   if (req.headers['content-type']) headers['content-type'] = req.headers['content-type'];
+  // Ключ владельца обязан дойти до бэкенда: без него хранилище отвечает
+  // 400, и «Мои работы» выглядят сломанными, хотя браузер ключ прислал.
+  if (req.headers['x-owner-key']) headers['x-owner-key'] = req.headers['x-owner-key'];
 
   const isJson = req.is('application/json');
   const init = { method: req.method, headers };
@@ -505,7 +508,7 @@ app.post('/api/generate', async (req, res) => {
  * идёт дальше, дописать один кусок проще, чем начинать всё заново.
  */
 app.post('/api/assemble', async (req, res) => {
-  const { plan, settings } = req.body || {};
+  const { plan, settings, ownerKey } = req.body || {};
 
   if (!plan || String(plan).trim().length < 100) {
     return res.status(400).json({
@@ -546,6 +549,17 @@ app.post('/api/assemble', async (req, res) => {
   const failed = [];    // что не получилось
   let aborted = false;
 
+  // Работа заводится в хранилище до первого куска и пополняется по
+  // ходу сборки. Смысл — не потерять написанное: раньше всё жило в
+  // памяти вкладки, и закрытый браузер стоил двух минут генерации и
+  // куска суточного лимита модели.
+  //
+  // Хранилище необязательно: если Python-бэкенд не поднят, сборка идёт
+  // как прежде, просто без сохранения. Ронять её из-за этого нельзя.
+  const storage = createWorkStorage(ownerKey, settings, plan);
+  await storage.start();
+  if (storage.id) send({ saved: { workId: storage.id } });
+
   // Слушать надо ОТВЕТ, а не запрос. У req событие close срабатывает,
   // как только прочитано тело - то есть сразу, ещё до первого куска.
   // С подпиской на req сборка тихо останавливалась после первой части:
@@ -566,6 +580,7 @@ app.post('/api/assemble', async (req, res) => {
       // почти не видно - чиним и показываем, что именно поправили.
       const { text, fixed } = fixHybrids(raw);
       done.push({ task, text });
+      await storage.savePiece(task, text, i);
       send({
         piece: {
           kind: task.kind,
@@ -584,12 +599,89 @@ app.post('/api/assemble', async (req, res) => {
     }
   }
 
+  // Статус проставляем и при обрыве: работа осталась незаконченной, и
+  // в списке это должно быть видно.
+  await storage.finish(aborted ? 'assembling' : 'done');
+
   if (!aborted) {
-    send({ finished: { written: done.length, failed: failed.length } });
+    send({
+      finished: {
+        written: done.length,
+        failed: failed.length,
+        workId: storage.id || undefined,
+      },
+    });
     res.write('data: [DONE]\n\n');
   }
   res.end();
 });
+
+/**
+ * Сохранение работы по ходу сборки.
+ *
+ * Обёртка над /api/v1/works Python-бэкенда. Все ошибки глушатся
+ * намеренно: хранение — приятное дополнение, а не условие работы
+ * генератора. Если бэкенд не запущен, пользователь всё равно получит
+ * текст, просто он не сохранится, и об этом скажет UI.
+ */
+function createWorkStorage(ownerKey, settings, plan) {
+  const key = String(ownerKey || '').trim();
+  const enabled = key.length >= 8;
+
+  const api = async (path, method, body) => {
+    const r = await fetch(`${PY_BACKEND}/api/v1/works${path}`, {
+      method,
+      headers: { 'Content-Type': 'application/json', 'X-Owner-Key': key },
+      body: body ? JSON.stringify(body) : undefined,
+    });
+    if (!r.ok) throw new Error(`${r.status}`);
+    return r.json();
+  };
+
+  return {
+    id: null,
+    failedOnce: false,
+
+    async start() {
+      if (!enabled) return;
+      try {
+        const created = await api('', 'POST', {
+          topic: (settings && settings.topic) || '',
+          plan: String(plan || ''),
+          settings: settings || {},
+        });
+        this.id = created.id;
+        await api(`/${this.id}`, 'PATCH', { status: 'assembling' });
+      } catch (e) {
+        this.failedOnce = true;
+      }
+    },
+
+    async savePiece(task, text, index) {
+      if (!this.id) return;
+      try {
+        await api(`/${this.id}/pieces`, 'POST', {
+          kind: task.kind,
+          number: task.number || null,
+          heading: task.heading || task.title || '',
+          text,
+          position: index,
+        });
+      } catch (e) {
+        this.failedOnce = true;
+      }
+    },
+
+    async finish(status) {
+      if (!this.id) return;
+      try {
+        await api(`/${this.id}`, 'PATCH', { status });
+      } catch (e) {
+        this.failedOnce = true;
+      }
+    },
+  };
+}
 
 /** Знаки без пробелов — в них заданы все нормы объёма. */
 function charsNoSpace(text) {

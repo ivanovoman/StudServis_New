@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -14,6 +15,7 @@ from app.modules.documents.api import router as documents_router
 from app.modules.ai_engine.api import router as ai_router
 from app.modules.humanizer.api import router as humanizer_router
 from app.modules.projects.api import router as projects_router
+from app.modules.projects.works_api import router as works_router
 from app.modules.sources.api import router as sources_router
 
 logging.basicConfig(
@@ -22,10 +24,30 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    """Создать таблицы хранения работ при старте.
+
+    Без этого первый же запрос к /works упал бы с «no such table», а
+    человек решил бы, что сервис сломан. Операция идемпотентная.
+
+    Падать на старте нельзя: без БД остальные модули — разбор темы,
+    ГОСТ-экспорт, детектор — работают и нужны.
+    """
+    from app.db import init_models
+
+    try:
+        await init_models()
+    except Exception as exc:  # noqa: BLE001
+        logger.error("Хранение работ недоступно: %s", exc)
+    yield
+
+
 app = FastAPI(
     title=settings.app_name,
     version="0.2.0",
     description="Генератор курсовых работ: RAG, ГОСТ-вёрстка, проверка источников",
+    lifespan=lifespan,
 )
 
 app.add_middleware(
@@ -41,6 +63,7 @@ app.include_router(projects_router, prefix=settings.api_prefix)
 app.include_router(humanizer_router, prefix=settings.api_prefix)
 app.include_router(ai_router, prefix=settings.api_prefix)
 app.include_router(sources_router, prefix=settings.api_prefix)
+app.include_router(works_router, prefix=settings.api_prefix)
 
 
 @app.exception_handler(Exception)

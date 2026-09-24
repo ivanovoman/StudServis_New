@@ -27,3 +27,4 @@ pypdf==5.1.0
 # --- Тесты ---
 pytest==8.3.4
 pytest-asyncio==0.25.0
+aiosqlite==0.20.0
