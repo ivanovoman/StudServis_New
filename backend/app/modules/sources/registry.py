@@ -79,6 +79,47 @@ def rank(sources: Iterable[Source], topic: str) -> list[Source]:
     return sorted(sources, key=key, reverse=True)
 
 
+#: Сколько мест в выдаче придержать для базы, проигравшей по числу
+#: попаданий. Русскоязычные заголовки КиберЛенинки совпадают с темой
+#: почти дословно и по релевантности бьют всё остальное — в итоге
+#: зарубежные работы не попадали в выдачу ни разу, хотя «степень
+#: разработанности темы» без них выглядит бедно.
+MINORITY_SLOTS = 2
+
+
+def _reserve_for_minority(ranked: list[Source], limit: int) -> list[Source]:
+    """Оставляет пару мест базе, которую иначе вытеснили бы целиком.
+
+    Порядок внутри выдачи не меняется: слабейшие из победившей базы
+    уступают место сильнейшим из проигравшей, и список пересобирается по
+    исходному ранжированию.
+    """
+    head = ranked[:limit]
+    if len(ranked) <= limit:
+        return head
+
+    present = {s.provider for s in head}
+    missing = [s for s in ranked[limit:] if s.provider not in present]
+    if not missing:
+        return head
+
+    # По одному представителю от каждой отсутствующей базы, не больше
+    # общего резерва.
+    picked: list[Source] = []
+    seen: set[str] = set()
+    for s in missing:
+        if s.provider in seen:
+            continue
+        seen.add(s.provider)
+        picked.append(s)
+        if len(picked) >= MINORITY_SLOTS:
+            break
+
+    keep = head[:limit - len(picked)]
+    chosen = set(id(s) for s in keep + picked)
+    return [s for s in ranked if id(s) in chosen][:limit]
+
+
 async def find_sources(
     topic: str,
     directions: list[str],
@@ -120,7 +161,7 @@ async def find_sources(
     # Слабые источники лучше пустоты: анализ хотя бы на чём-то стоит.
     pool = relevant or [s for _, s in scored]
 
-    top = rank(pool, topic)[:limit]
+    top = _reserve_for_minority(rank(pool, topic), limit)
 
     # Сохраняем оценку: дальше её читает check_grounding, а показать её
     # пользователю честнее, чем прятать.

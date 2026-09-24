@@ -28,7 +28,11 @@ Zenodo, отличающиеся последней цифрой). Дедупл�
 from __future__ import annotations
 
 import json
+import logging
+import os
 import re
+import time
+import urllib.error
 import urllib.parse
 import urllib.request
 from dataclasses import dataclass, field
@@ -38,10 +42,41 @@ from typing import Any, Iterable
 API_URL = "https://api.openalex.org/works"
 
 # OpenAlex просит представляться: вежливый пул даёт больше квоты.
-USER_AGENT = "StudServis/1.0 (mailto:dev@studservis.ru)"
+CONTACT_EMAIL = os.getenv("OPENALEX_EMAIL", "dev@studservis.ru")
+USER_AGENT = f"StudServis/1.0 (mailto:{CONTACT_EMAIL})"
 
 DEFAULT_TIMEOUT = 30.0
 MIN_ABSTRACT_CHARS = 150
+
+log = logging.getLogger(__name__)
+
+#: Сколько раз повторить запрос, упёршийся в лимит. Осенью 2026 OpenAlex
+#: начал резать анонимный полнотекстовый поиск: два-три запроса подряд
+#: проходят, следующий получает 429 с просьбой подождать. Раньше это
+#: означало молча пустую выдачу — пользователь видел «источников нет» и
+#: думал, что их правда нет.
+RETRY_ON_LIMIT = 2
+
+#: Сколько ждать между попытками, если сервер не назвал своё время.
+RETRY_PAUSE = 4.0
+
+#: Дольше этого не ждём за один раз: человек смотрит на крутилку, а у
+#: нас есть вторая база, которая ответит сразу.
+MAX_RETRY_WAIT = 8.0
+
+#: Сколько всего секунд за один подбор источников позволено потратить на
+#: ожидание лимитов. Запросов в подборе несколько, и если каждый будет
+#: честно отстаивать свою очередь, поиск растянется на минуту.
+#:
+#: Без ключа не ждём вовсе. С февраля 2026 OpenAlex требует ключ, а
+#: анонимам оставил около сотни запросов в сутки на всех — упёршись в
+#: этот потолок, ждать бесполезно: он снимается не через секунды, а
+#: назавтра. Ключ бесплатный, поэтому лечится это не кодом.
+RETRY_BUDGET = 8.0
+
+
+def _has_api_key() -> bool:
+    return bool(os.getenv("OPENALEX_API_KEY", "").strip())
 
 
 @dataclass
@@ -196,6 +231,15 @@ def build_query_url(query: str, *, since_year: int | None = None,
     }
     if filters:
         params["filter"] = ",".join(filters)
+
+    # Представляемся всегда — это «вежливый пул» с большей квотой.
+    # Ключ (раздаётся бесплатно на openalex.org/rest-api) снимает лимит
+    # совсем; без него работаем, просто с повторами.
+    params["mailto"] = CONTACT_EMAIL
+    api_key = os.getenv("OPENALEX_API_KEY", "").strip()
+    if api_key:
+        params["api_key"] = api_key
+
     return f"{API_URL}?{urllib.parse.urlencode(params)}"
 
 
@@ -205,10 +249,66 @@ def _fetch(url: str, timeout: float) -> dict[str, Any]:
         return json.loads(resp.read().decode("utf-8"))
 
 
+def _retry_after(err: urllib.error.HTTPError) -> float:
+    """Сколько сервер просит подождать. Своё число он кладёт в тело."""
+    try:
+        body = json.loads(err.read().decode("utf-8"))
+        wait = float(body.get("retryAfter") or 0)
+    except Exception:
+        wait = 0.0
+    if wait <= 0:
+        wait = RETRY_PAUSE
+    return min(wait, MAX_RETRY_WAIT)
+
+
+class _Budget:
+    """Общий запас ожидания на серию запросов."""
+
+    def __init__(self, seconds: float | None = None) -> None:
+        if seconds is None:
+            seconds = RETRY_BUDGET if _has_api_key() else 0.0
+        self.left = seconds
+
+    def take(self, seconds: float) -> float:
+        """Выдаёт паузу, какую может себе позволить. 0 — ждать нельзя."""
+        allowed = min(seconds, self.left)
+        if allowed <= 0:
+            return 0.0
+        self.left -= allowed
+        return allowed
+
+
+def _fetch_with_retry(url: str, timeout: float, fetcher=None,
+                      budget: _Budget | None = None) -> dict[str, Any]:
+    """Запрос с повтором при 429.
+
+    Лимит у OpenAlex временный и снимается через несколько секунд, так
+    что одна повторная попытка возвращает большую часть потерянной
+    выдачи. Общее время ожидания ограничено бюджетом на весь подбор.
+    """
+    call = fetcher or _fetch
+    # Одиночный запрос тоже считает бюджет: иначе он ждал бы по полному
+    # разу на каждую попытку и без ключа — совершенно впустую.
+    budget = budget or _Budget()
+    for attempt in range(RETRY_ON_LIMIT + 1):
+        try:
+            return call(url, timeout)
+        except urllib.error.HTTPError as err:
+            if err.code != 429 or attempt == RETRY_ON_LIMIT:
+                raise
+            wait = _retry_after(err)
+            wait = budget.take(min(wait, MAX_RETRY_WAIT))
+            if wait <= 0:
+                raise
+            log.info("OpenAlex ограничил запросы, ждём %.0f с", wait)
+            time.sleep(wait)
+    raise RuntimeError("недостижимо")
+
+
 def search(query: str, *, since_year: int | None = None,
            per_page: int = 25, oa_only: bool = True,
            timeout: float = DEFAULT_TIMEOUT,
-           fetcher=None) -> list[Source]:
+           fetcher=None, budget: "_Budget | None" = None) -> list[Source]:
     """Ищет публикации. Сетевые ошибки не пробрасываются наверх.
 
     Поиск источников не должен ронять анализ темы: если OpenAlex
@@ -217,8 +317,18 @@ def search(query: str, *, since_year: int | None = None,
     url = build_query_url(query, since_year=since_year,
                           per_page=per_page, oa_only=oa_only)
     try:
-        data = (fetcher or _fetch)(url, timeout)
-    except Exception:
+        data = _fetch_with_retry(url, timeout, fetcher, budget)
+    except Exception as err:
+        # Молчать нельзя: пустая выдача выглядит как «по теме ничего не
+        # написано», хотя на деле упал провайдер. Однажды это уже стоило
+        # нам суток уверенности, что OpenAlex просто не знает русского.
+        hint = ""
+        if isinstance(err, urllib.error.HTTPError) and err.code == 429 \
+                and not _has_api_key():
+            hint = (" — задайте OPENALEX_API_KEY, бесплатный ключ "
+                    "берётся на openalex.org/settings/api")
+        log.warning("OpenAlex не ответил на «%s»: %s: %s%s",
+                    query[:60], type(err).__name__, err, hint)
         return []
     works = data.get("results") or []
     return [parse_work(w) for w in works]
@@ -369,8 +479,14 @@ def find_sources_for_topic(directions: list[str], *,
     queries = list(directions)
     if topic and topic not in queries:
         queries.insert(0, topic)          # сама тема — самый точный запрос
+
+    # Бюджет один на весь подбор, а не на каждый запрос.
+    budget = _Budget()
     for d in queries:
-        collected.extend(run(d, since_year=since_year, per_page=per_query))
+        kw = {"since_year": since_year, "per_page": per_query}
+        if run is search:
+            kw["budget"] = budget
+        collected.extend(run(d, **kw))
 
     usable = [s for s in deduplicate(collected) if s.has_usable_abstract]
     if topic:
