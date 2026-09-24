@@ -212,6 +212,14 @@
                            + ': ' + p.title;
         bar.style.width = Math.round((p.index - 1) / p.total * 100) + '%';
       }
+      if (ev.expanding) {
+        // Дописывание занимает столько же, сколько сам раздел. Без
+        // подписи выглядит как зависший прогресс.
+        var x = ev.expanding;
+        status.textContent = 'Раздел вышел коротким (' + x.have + ' из '
+          + x.need + ' знаков) — дописываю'
+          + (x.attempt > 1 ? ' (попытка ' + x.attempt + ')' : '');
+      }
       if (ev.piece) {
         collected.push(ev.piece);
         var row = el('div', {

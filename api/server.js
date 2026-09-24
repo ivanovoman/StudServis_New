@@ -559,7 +559,7 @@ app.post('/api/assemble', async (req, res) => {
     send({ progress: { index: i + 1, total: queue.length, title: task.heading || task.title } });
 
     try {
-      const raw = await writePiece(task, { plan, settings, done });
+      const raw = await writeFullPiece(task, { plan, settings, done }, send);
 
       // Модель изредка мешает латиницу с кириллицей внутри слова
       // («kompetенции»). В готовой работе это брак, а глазами такое
@@ -591,6 +591,93 @@ app.post('/api/assemble', async (req, res) => {
   res.end();
 });
 
+/** Знаки без пробелов — в них заданы все нормы объёма. */
+function charsNoSpace(text) {
+  return String(text).replace(/\s/g, '').length;
+}
+
+/**
+ * Нижняя граница объёма для куска работы.
+ *
+ * Держим в одном месте, потому что эти же числа зашиты в промптах, и
+ * расходиться они не должны.
+ */
+const MIN_CHARS = { section: 5000, introduction: 3800, conclusion: 2000 };
+
+/**
+ * Куда целимся при доборе — середина диапазона, а не нижняя граница.
+ * Целиться в минимум нельзя: промахнувшись на сотню знаков вниз, мы
+ * запустим ещё один круг ради мелочи.
+ */
+const TARGET_CHARS = { section: 5500, introduction: 4400, conclusion: 3000 };
+
+/**
+ * Коэффициент запроса при доборе.
+ *
+ * На доборе модель ведёт себя ровно наоборот, чем на основном шаге:
+ * там она не дотягивает до заданного объёма, здесь — пишет примерно
+ * вдвое больше, чем попросили (замер: просили 2785 знаков, получили
+ * 3944; просили 711 — получили 1304). Поэтому просим примерно половину
+ * недостающего. Если промахнёмся вниз, сработает вторая попытка.
+ */
+const EXPAND_RATIO = 0.5;
+
+/**
+ * Написать кусок и, если он вышел коротким, дописать до нормы.
+ *
+ * Зачем отдельный проход. Модель стабильно останавливается раньше
+ * заданного объёма: на живом прогоне все четыре раздела вышли по
+ * 3100-4700 знаков при норме 5000-6000. В промпте объём указан, но
+ * модель считает мысль законченной и заканчивает. Увеличивать давление
+ * в основном промпте вредно — начинается вода.
+ *
+ * Поэтому объём добирается вторым вызовом, который видит уже написанное
+ * и получает жёсткий запрет на воду со списком допустимых содержательных
+ * ходов. Попыток не больше двух: если и после них коротко, отдаём как
+ * есть и говорим об этом пользователю, а не крутим цикл бесконечно.
+ */
+async function writeFullPiece(task, ctx, send) {
+  let text = await writePiece(task, ctx);
+
+  const min = MIN_CHARS[task.kind];
+  if (!min) return text;
+
+  const MAX_TRIES = 2;
+  for (let attempt = 1; attempt <= MAX_TRIES; attempt += 1) {
+    const have = charsNoSpace(text);
+    if (have >= min) break;
+
+    const target = TARGET_CHARS[task.kind] || min;
+    // Меньше 400 знаков просить бессмысленно — это один абзац, модель
+    // всё равно напишет больше.
+    const need = Math.max(400, Math.round((target - have) * EXPAND_RATIO));
+    if (send) {
+      send({
+        expanding: {
+          heading: task.heading || task.title,
+          have,
+          need: min,
+          attempt,
+        },
+      });
+    }
+
+    let added;
+    try {
+      added = await writePiece(task, ctx, { expand: { text, need } });
+    } catch (e) {
+      // Добор не удался — раздел уже есть, терять его из-за этого
+      // нельзя. Отдаём что написано.
+      break;
+    }
+
+    if (charsNoSpace(added) < 200) break;   // модель отказалась дописывать
+    text = `${text.trim()}\n\n${added.trim()}`;
+  }
+
+  return text;
+}
+
 /**
  * Написать один кусок работы: введение, раздел или заключение.
  *
@@ -598,10 +685,13 @@ app.post('/api/assemble', async (req, res) => {
  * строки. Целиком они не влезут в контекст к середине работы, а для
  * борьбы с повторами достаточно знать, о чём уже сказано.
  */
-async function writePiece(task, ctx) {
+async function writePiece(task, ctx, opts = {}) {
   const { plan, settings, done } = ctx;
+  const expand = opts.expand || null;
 
-  const stepName = task.kind === 'section' ? 'section_write' : task.kind;
+  const stepName = expand
+    ? 'section_expand'
+    : (task.kind === 'section' ? 'section_write' : task.kind);
   const raw = STEP_PROMPTS[stepName];
   if (!raw) throw new Error(`нет промпта для шага ${stepName}`);
 
@@ -631,7 +721,16 @@ async function writePiece(task, ctx) {
   }
 
   let user;
-  if (task.kind === 'section') {
+  if (expand) {
+    // Написанную часть даём целиком: дописывать продолжение, видя лишь
+    // краткую выжимку, нельзя — получится повтор уже сказанного.
+    user = `Раздел ${task.heading || task.title} написан не полностью.`;
+    if (task.brief) user += `\n\nПлан этого раздела:\n${task.brief}`;
+    user += `\n\nУЖЕ НАПИСАННАЯ ЧАСТЬ РАЗДЕЛА:\n\n${expand.text}`;
+    user += `\n\nДопиши примерно ${expand.need} знаков без пробелов — только`
+          + ' новые абзацы, продолжающие этот текст. Повторять написанное'
+          + ' выше нельзя.';
+  } else if (task.kind === 'section') {
     user = `Напиши раздел ${task.heading}.`;
     if (task.chapterTitle) user += `\nОн входит в главу «${task.chapterTitle}».`;
     if (task.brief) user += `\n\nПлан этого раздела:\n${task.brief}`;
