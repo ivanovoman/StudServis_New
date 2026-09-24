@@ -76,6 +76,30 @@ let gigachatToken = { value: null, expiresAt: 0 };
 let tlsWarned = false;
 
 /**
+ * Приводит набор сообщений к тому виду, который принимает GigaChat.
+ *
+ * OpenAI-совместимые API спокойно берут несколько system-сообщений в
+ * любом месте списка, и мы этим пользуемся: первое — роль автора,
+ * второе — бриф с темой, вузом, методичкой и пожеланиями. GigaChat так
+ * не умеет и отвечает
+ *   400 Invalid params: system message must be the first message
+ *
+ * Поэтому склеиваем все system в одно и ставим его первым. Порядок
+ * внутри сохраняем — бриф должен идти после роли, он её уточняет.
+ * Остальные сообщения (user/assistant) идут следом как есть.
+ */
+function normalizeForGigachat(messages) {
+  const system = [];
+  const rest = [];
+  for (const m of messages) {
+    if (m.role === 'system') system.push(m.content);
+    else rest.push(m);
+  }
+  if (!system.length) return rest;
+  return [{ role: 'system', content: system.join('\n\n') }, ...rest];
+}
+
+/**
  * Отключение проверки TLS-сертификата для GigaChat.
  *
  * Встроенный в Node fetch не позволяет задать доверенные сертификаты
@@ -102,9 +126,16 @@ const gigachat = {
   id: 'gigachat',
   title: 'GigaChat (Сбер)',
   needsKey: 'GIGACHAT_AUTH_KEY',
+  // Проверено живым запросом 24.09.2026: аккаунт физлица видит 6 текстовых
+  // моделей. Порядок — от качества к скорости. Ultra пишет заметно более
+  // связный научный текст, Pro почти не уступает и отвечает вдвое быстрее,
+  // поэтому он идёт следом и принимает нагрузку, когда квота Ultra кончится.
   defaultModels: [
+    'GigaChat-3-Ultra',
+    'GigaChat-3-Pro',
     'GigaChat-2-Max',
     'GigaChat-2-Pro',
+    'GigaChat-3-Lightning',
     'GigaChat-2',
   ],
 
@@ -148,7 +179,13 @@ const gigachat = {
   async stream(model, messages, env) {
     applyGigachatTls(env);
     const token = await this.getToken(env);
-    return fetch('https://gigachat.devices.sberbank.ru/api/v1/chat/completions', {
+    messages = normalizeForGigachat(messages);
+    // Новый адрес API. Старый gigachat.devices.sberbank.ru пока отвечает,
+    // но Сбер перевёл документацию на api.giga.chat, и старые хосты рано
+    // или поздно отключают. Переопределяется через GIGACHAT_API_URL.
+    const url = env.GIGACHAT_API_URL
+      || 'https://api.giga.chat/v1/chat/completions';
+    return fetch(url, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',

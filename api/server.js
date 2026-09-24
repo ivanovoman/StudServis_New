@@ -306,6 +306,14 @@ async function callOpenRouterWithFallback(messages) {
           const upstream = await provider.stream(model, messages, process.env);
 
           if (upstream.ok && upstream.body) {
+            // Если до этого кто-то отказал, это надо видеть. Иначе
+            // подключаешь GigaChat, он молча падает, отвечает запасной
+            // OpenRouter — и выглядит так, будто всё работает.
+            if (errors.size) {
+              for (const [title, msg] of errors) {
+                console.warn(`  ! ${title}: ${msg}`);
+              }
+            }
             return { upstream, usedModel: `${provider.title} · ${model}` };
           }
 

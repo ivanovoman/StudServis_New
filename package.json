@@ -5,8 +5,9 @@
   "description": "СЕРВИС СТУДРАБОТ - помощник студента для создания курсовых работ",
   "main": "api/server.js",
   "scripts": {
-    "start": "node api/server.js",
-    "dev": "node --watch api/server.js"
+    "start": "node api/start.js",
+    "dev": "node --watch api/start.js",
+    "check:gigachat": "node tools/check-gigachat.js"
   },
   "engines": {
     "node": ">=18"
