@@ -549,6 +549,10 @@ app.post('/api/assemble', async (req, res) => {
   const failed = [];    // что не получилось
   let aborted = false;
 
+  // Итог по ссылкам на закон за всю работу — показываем в конце, чтобы
+  // предупреждения, пролетевшие мимо глаз по ходу сборки, не пропали.
+  const legalTotals = { checked: 0, wrong: 0, unclear: 0 };
+
   // Работа заводится в хранилище до первого куска и пополняется по
   // ходу сборки. Смысл — не потерять написанное: раньше всё жило в
   // памяти вкладки, и закрытый браузер стоил двух минут генерации и
@@ -581,6 +585,24 @@ app.post('/api/assemble', async (req, res) => {
       const { text, fixed } = fixHybrids(raw);
       done.push({ task, text });
       await storage.savePiece(task, text, i);
+
+      // Сверяем ссылки сразу: оглавления кодексов кэшируются на
+      // бэкенде, поэтому со второй части проверка почти бесплатна.
+      const legal = await checkLegalRefs(text);
+      if (legal && (legal.wrong.length || legal.unclear.length)) {
+        legalTotals.wrong += legal.wrong.length;
+        legalTotals.unclear += legal.unclear.length;
+        send({
+          legal: {
+            heading: task.heading || task.title,
+            checked: legal.checked,
+            wrong: legal.wrong,
+            unclear: legal.unclear,
+          },
+        });
+      }
+      if (legal) legalTotals.checked += legal.checked;
+
       send({
         piece: {
           kind: task.kind,
@@ -609,12 +631,55 @@ app.post('/api/assemble', async (req, res) => {
         written: done.length,
         failed: failed.length,
         workId: storage.id || undefined,
+        legal: legalTotals.checked ? legalTotals : undefined,
       },
     });
     res.write('data: [DONE]\n\n');
   }
   res.end();
 });
+
+/**
+ * Сверка ссылок на статьи кодексов с оглавлениями с consultant.ru.
+ *
+ * Зачем прямо в сборке. Модель уверенно выдумывает номера статей — это
+ * самая опасная ошибка в юридической работе, потому что выглядит она
+ * безупречно. Проверять постфактум пользователь забывает, а увидев
+ * предупреждение сразу под разделом, он его прочитает.
+ *
+ * Возвращает null, если проверка недоступна: Python-бэкенд не запущен
+ * или consultant.ru не ответил. Ронять сборку из-за этого нельзя —
+ * текст уже написан и стоит потраченного лимита модели.
+ */
+async function checkLegalRefs(text) {
+  try {
+    const r = await fetch(`${PY_BACKEND}/api/v1/sources/verify-legal`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text }),
+      signal: AbortSignal.timeout(25000),
+    });
+    if (!r.ok) return null;
+
+    const data = await r.json();
+    const refs = data.references || [];
+
+    // Наружу отдаём только то, что требует внимания. Совпавшие ссылки
+    // перечислять незачем: длинный зелёный список читать не будут, а
+    // важное в нём потеряется.
+    const pick = (status) => refs
+      .filter((x) => x.status === status)
+      .map((x) => ({ label: x.label, note: x.note || '' }));
+
+    return {
+      checked: refs.length,
+      wrong: [...pick('missing'), ...pick('mismatch')],
+      unclear: pick('unclear'),
+    };
+  } catch (e) {
+    return null;
+  }
+}
 
 /**
  * Сохранение работы по ходу сборки.

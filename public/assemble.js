@@ -138,6 +138,7 @@
 
     var busy = false;
     var collected = [];   // готовые куски для экспорта
+    var pendingLegal = null;  // сверка ссылок, ждущая своего куска
 
     runBtn.onclick = function () {
       if (busy) return;
@@ -239,6 +240,11 @@
           + x.need + ' знаков) — дописываю'
           + (x.attempt > 1 ? ' (попытка ' + x.attempt + ')' : '');
       }
+      // Сверка ссылок на закон приходит перед самим куском — придержим
+      // её, чтобы показать прямо под заголовком раздела, к которому она
+      // относится, а не отдельной строкой непонятно о чём.
+      if (ev.legal) { pendingLegal = ev.legal; }
+
       if (ev.piece) {
         collected.push(ev.piece);
         var row = el('div', {
@@ -260,6 +266,30 @@
                return f.from + ' → ' + f.to;
              }).join(', ')
            + ' — проверьте, что замена верна'));
+        }
+
+        // Выдуманные номера статей — самая дорогая ошибка в юрработе:
+        // выглядит она безупречно, а на защите обнаруживается сразу.
+        if (pendingLegal) {
+          if (pendingLegal.wrong && pendingLegal.wrong.length) {
+            row.appendChild(el('div', {
+              fontSize: '12px', color: '#ff9999', marginTop: '3px',
+            }, 'Ссылки на закон не сходятся — исправьте:'));
+            pendingLegal.wrong.forEach(function (w) {
+              row.appendChild(el('div', {
+                fontSize: '12px', color: '#ff9999', paddingLeft: '10px',
+              }, '• ' + w.label + ' — ' + w.note));
+            });
+          }
+          if (pendingLegal.unclear && pendingLegal.unclear.length) {
+            row.appendChild(el('div', {
+              fontSize: '12px', opacity: '0.7', marginTop: '3px',
+            }, 'Сверить не удалось, взгляните сами: '
+             + pendingLegal.unclear.map(function (u) {
+                 return u.label;
+               }).join(', ')));
+          }
+          pendingLegal = null;
         }
 
         out.appendChild(row);
@@ -290,6 +320,17 @@
           sum.appendChild(el('div', { color: '#ffcc66' },
             'Не получилось частей: ' + ev.finished.failed
           + '. Допишите их через пункт 3 и вставьте в документ.'));
+        }
+        var lg = ev.finished.legal;
+        if (lg) {
+          sum.appendChild(el('div', {
+            fontSize: '12px',
+            color: lg.wrong ? '#ff9999' : '#8fd18f',
+          }, lg.wrong
+            ? ('Ссылок на статьи проверено: ' + lg.checked
+             + ', не сходится: ' + lg.wrong + ' — они отмечены выше')
+            : ('Ссылки на статьи проверены по кодексам: ' + lg.checked
+             + ', расхождений нет')));
         }
         sum.appendChild(el('div', { fontSize: '12px', opacity: '0.7' },
           'Текст написан моделью по вашему плану. Реквизиты норм и '

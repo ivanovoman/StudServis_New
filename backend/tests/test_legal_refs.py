@@ -185,3 +185,62 @@ def test_suspicious_excludes_listed():
 def test_known_codes_resolve(code, toc, article):
     ref = Reference(code=code, article=article, context="", claim="")
     assert compare(ref, toc).real_title == toc[article]
+
+
+# --- «не сошлось» против «не удалось сверить» -------------------------
+#
+# Живой прогон работы «Коллизии в праве» дал 4 красных из 9, и все
+# четыре оказались ложными: текст пересказывал статью своими словами, а
+# сверка требовала буквального совпадения слов с заголовком. Красный
+# цвет обесценивается, если в половине случаев он врёт, поэтому теперь
+# обвинение предъявляется, только когда видно, какая статья имелась в
+# виду на самом деле.
+
+def test_paraphrase_is_unclear_not_mismatch():
+    """Пересказ своими словами — повод посмотреть, а не приговор."""
+    refs = extract(
+        "Ст. 6 ГК РФ позволяет восполнять отсутствие прямой нормы "
+        "сходным регулированием."
+    )
+    ref = compare(refs[0], GK)
+    assert ref.status == "unclear"
+    assert "сверьте по смыслу сами" in ref.note
+
+
+def test_wrong_number_is_named():
+    """Если подходит другая статья того же кодекса — называем её номер."""
+    toc = dict(GK)
+    toc["13"] = ("Признание недействительным акта государственного "
+                 "органа или органа местного самоуправления")
+    toc["10"] = "Пределы осуществления гражданских прав"
+    refs = extract(
+        "Ст. 10 ГК РФ о признании недействительным акта "
+        "государственного органа применяется судами."
+    )
+    ref = compare(refs[0], toc)
+    assert ref.status == "mismatch"
+    assert "ст. 13" in ref.note
+
+
+def test_repealed_stays_mismatch():
+    """«Утратила силу» — всегда ошибка, гадать тут не о чем."""
+    refs = extract("Согласно ст. 7 ТК РФ работник вправе требовать.")
+    assert compare(refs[0], TK).status == "mismatch"
+
+
+def test_unclear_separate_from_suspicious():
+    """Жёлтое не должно попадать в список красного."""
+    unclear = Reference(code="ГК", article="6", context="",
+                        status="unclear")
+    wrong = Reference(code="ТК", article="7", context="",
+                      status="mismatch")
+    result = CheckResult(references=[unclear, wrong])
+    assert result.unclear == [unclear]
+    assert result.suspicious == [wrong]
+
+
+def test_summary_separates_unclear():
+    unclear = Reference(code="ГК", article="6", context="",
+                        status="unclear", real_title="Аналогия закона")
+    text = CheckResult(references=[unclear]).summary()
+    assert "проверьте глазами" in text

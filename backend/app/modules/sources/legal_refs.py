@@ -113,7 +113,7 @@ class Reference:
     context: str              #: фраза, в которой стоит ссылка
     claim: str = ""           #: что именно текст утверждает про статью
     real_title: str = ""      #: настоящий заголовок статьи
-    status: str = "unknown"   #: ok | mismatch | missing | unknown
+    status: str = "unknown"   #: ok | mismatch | unclear | missing | listed | unknown
     note: str = ""            #: пояснение для человека
 
     @property
@@ -143,6 +143,17 @@ class CheckResult:
         """Ссылки из перечней — их смысл машина сверить не может."""
         return [r for r in self.references if r.status == "listed"]
 
+    @property
+    def unclear(self) -> list[Reference]:
+        """Ссылки, которые машина не смогла сопоставить с заголовком.
+
+        Отдельно от ``suspicious`` намеренно. Это не ошибки, а места,
+        где автор пересказал статью своими словами. Если валить их в
+        одну кучу с настоящими расхождениями, человек привыкает
+        пролистывать красное — и настоящая ошибка теряется в шуме.
+        """
+        return [r for r in self.references if r.status == "unclear"]
+
     def summary(self) -> str:
         """Человекочитаемый итог проверки.
 
@@ -170,6 +181,14 @@ class CheckResult:
         else:
             lines.append(f"Проверено ссылок: {len(self.references)}. "
                          f"Явных расхождений нет.")
+
+        unclear = self.unclear
+        if unclear:
+            lines.append("")
+            lines.append("Не удалось сверить автоматически — проверьте "
+                         "глазами (скорее всего, всё в порядке):")
+            for r in unclear:
+                lines.append(f"* {r.label} — «{r.real_title}»")
 
         if listed:
             lines.append("")
@@ -344,7 +363,8 @@ def compare(ref: Reference, toc: dict[str, str]) -> Reference:
 
     * ``ok`` — номер есть, и смысл сходится с заголовком;
     * ``missing`` — статьи с таким номером в кодексе нет;
-    * ``mismatch`` — номер есть, но статья совсем о другом;
+    * ``mismatch`` — номер есть, но описанное подходит другой статье;
+    * ``unclear`` — сверить не удалось, нужен человек;
     * ``listed`` — ссылка стоит в перечне, сверять смысл не с чем;
     * ``unknown`` — не удалось получить оглавление.
     """
@@ -374,15 +394,76 @@ def compare(ref: Reference, toc: dict[str, str]) -> Reference:
         ref.note = f"упомянута в перечне; статья называется «{title}»"
         return ref
 
-    overlap = _overlap(_words(title), _words(ref.claim or ref.context))
+    claim_words = _words(ref.claim or ref.context)
+    overlap = _overlap(_words(title), claim_words)
     if overlap:
         ref.status = "ok"
         ref.note = f"«{title}»"
-    else:
+        return ref
+
+    # Слова не сошлись. Само по себе это НЕ ошибка: научный текст
+    # пересказывает статью своими словами, а не цитирует заголовок.
+    # На живом прогоне так было помечено 4 ссылки из 9, и все четыре
+    # оказались верными («ст. 3 ГК провозглашает приоритет кодекса» —
+    # заголовок «Гражданское законодательство и иные акты…»).
+    #
+    # Красный статус имеет смысл только тогда, когда видно, что автор
+    # перепутал номер: описание подходит к другой статье того же
+    # кодекса заметно лучше, чем к названной. Тогда мы не просто
+    # ругаемся, а подсказываем номер.
+    better = _better_article(claim_words, toc, exclude=ref.article)
+    if better:
+        number, other_title = better
         ref.status = "mismatch"
-        ref.note = (f"в тексте про другое, а статья называется «{title}». "
-                    f"Проверьте номер")
+        ref.note = (
+            f"статья называется «{title}», а описанное в тексте похоже "
+            f"на ст. {number} — «{other_title}». Проверьте номер"
+        )
+        return ref
+
+    ref.status = "unclear"
+    ref.note = (
+        f"статья называется «{title}» — сверьте по смыслу сами: "
+        f"машина не поняла, о том ли она"
+    )
     return ref
+
+
+#: Насколько описание должно совпасть с чужим заголовком, чтобы counted
+#: как подсказка. Одно общее слово — это шум («нормы», «право»),
+#: поэтому берём от двух.
+_BETTER_MIN_WORDS = 2
+
+
+def _better_article(
+    claim_words: set[str], toc: dict[str, str], exclude: str
+) -> tuple[str, str] | None:
+    """Найти статью того же кодекса, к которой описание подходит лучше.
+
+    Нужна, чтобы отличить перепутанный номер от обычного пересказа.
+    Если в тексте сказано «ст. 61.12 ГК о непередаче документов», а
+    статья с таким названием в кодексе есть под другим номером — это
+    настоящая ошибка, и полезно назвать правильный номер.
+
+    Возвращает пару (номер, заголовок) либо None, если ничего заметно
+    лучшего нет.
+    """
+    best: tuple[int, str, str] | None = None
+
+    for number, title in toc.items():
+        if number == exclude:
+            continue
+        if title.lower().startswith("утратил"):
+            continue
+        score = len(_overlap(_words(title), claim_words))
+        if score < _BETTER_MIN_WORDS:
+            continue
+        if best is None or score > best[0]:
+            best = (score, number, title)
+
+    if best is None:
+        return None
+    return best[1], best[2]
 
 
 async def check_text(text: str) -> CheckResult:
