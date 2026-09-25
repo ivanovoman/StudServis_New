@@ -215,3 +215,65 @@ def format_list(sources: list[Source], *,
     if not numbered:
         return "\n".join(records)
     return "\n".join(f"{i}. {r}" for i, r in enumerate(records, 1))
+
+
+def format_footnote(source: Source, *, page: str = "") -> str:
+    """Подстрочная ссылка по ГОСТ Р 7.0.5-2008.
+
+    Она короче записи в списке литературы и устроена иначе — это
+    отдельный стандарт, а не сокращение первого:
+
+        Рябов С. И. Некоторые проблемы пробелов и коллизий в праве //
+        Право и управление. 2024. № 9. С. 301.
+
+    Отличия, которые видит нормоконтроль:
+
+    * фамилия **не** отделяется запятой от инициалов;
+    * сведений об ответственности после косой черты нет — автор уже
+      назван в начале;
+    * разделитель между элементами — точка, а не « – »;
+    * если ссылаются на конкретное место, указывают **одну** страницу
+      («С. 301»), а не весь диапазон статьи.
+
+    `page` — страница, на которую ссылается автор работы. Мы её не
+    выдумываем: если она неизвестна, ставится диапазон всей статьи.
+    """
+    title = re.sub(r"\s+", " ", (source.title or "").strip()).rstrip(".")
+    if not title:
+        return ""
+
+    authors = [a for a in (source.authors or []) if a and a.strip()]
+    parts: list[str] = []
+
+    if authors:
+        family, initials = _initials(authors[0])
+        head = f"{family} {initials}".strip() if initials else family
+        if len(authors) > MAX_AUTHORS_IN_HEAD:
+            head = f"{head} [и др.]"
+        parts.append(f"{head} {title}")
+    else:
+        parts.append(title)
+
+    venue = re.sub(r"\s+", " ", (source.venue or "").strip())
+    if venue:
+        parts[0] = f"{parts[0]} // {venue}"
+
+    tail: list[str] = []
+    if source.year:
+        tail.append(f"{source.year}.")
+
+    issue = _issue_block(source)
+    if issue:
+        tail.append(f"{issue}.")
+
+    if page:
+        tail.append(f"С. {page.strip()}.")
+    elif source.pages:
+        tail.append(_pages_block(source.pages) + ".")
+    elif source.url:
+        # У электронного ресурса без страниц ссылка обязательна.
+        tail.append(f"URL: {source.url} (дата обращения: "
+                    f"{date.today().strftime('%d.%m.%Y')}).")
+
+    record = parts[0] + ". " + " ".join(tail)
+    return re.sub(r"\s+", " ", record).strip()

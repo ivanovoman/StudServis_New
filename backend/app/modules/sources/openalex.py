@@ -191,10 +191,36 @@ def surname_first(name: str) -> str:
     считается последнее слово, кроме случая, когда оно инициал.
     """
     clean = " ".join((name or "").split())
-    if not clean or re.search(r"[а-яёА-ЯЁ]", clean):
+    if not clean:
         return clean
 
     parts = clean.replace(",", " ").split()
+
+    # Русские имена базы пишут по-разному. КиберЛенинка — «Фамилия Имя
+    # Отчество», а DOAJ — наоборот, «Наталия Владимировна ИЛЬЮТЧЕНКО».
+    # Во втором случае фамилией становилось имя.
+    if re.search(r"[а-яёА-ЯЁ]", clean):
+        if len(parts) < 2:
+            return clean
+        # Признак первый: фамилия набрана прописными, остальное нет.
+        # Инициалы «А.А.» тоже набраны прописными — их за фамилию
+        # принимать нельзя.
+        tail_is_initials = "." in parts[-1] or len(parts[-1]) <= 2
+        last_is_caps = (parts[-1].isupper() and not parts[0].isupper()
+                        and not tail_is_initials)
+        # Признак второй: отчество стоит вторым из трёх — значит
+        # порядок «Имя Отчество Фамилия».
+        patronymic = re.compile(
+            r"(ович|евич|ьич|овна|евна|ична|инична)$", re.I)
+        middle_is_patronymic = (len(parts) == 3
+                                and bool(patronymic.search(parts[1]))
+                                and not patronymic.search(parts[-1]))
+        if last_is_caps or middle_is_patronymic:
+            return " ".join([parts[-1].title() if parts[-1].isupper()
+                             else parts[-1]] + parts[:-1])
+        return clean
+
+
     if len(parts) < 2:
         return clean
     # «Smith, J.» база уже отдала в нужном порядке — не трогаем.

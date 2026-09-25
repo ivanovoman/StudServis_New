@@ -18,7 +18,8 @@ from __future__ import annotations
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
-from app.modules.sources.gost_biblio import format_list, format_source
+from app.modules.sources.gost_biblio import (
+    format_footnote, format_list, format_source)
 from app.modules.sources.grounding import format_sources_for_prompt
 from app.modules.sources.legal_refs import check_text
 from app.modules.sources.registry import find_sources
@@ -90,6 +91,7 @@ async def search_sources(payload: SearchIn) -> dict:
                 "provider": s.provider,
                 "has_fulltext": bool(s.fulltext),
                 "pages": s.pages,
+                "footnote": format_footnote(s),
                 "volume": s.volume,
                 "issue": s.issue,
                 "gost": format_source(s),

@@ -117,6 +117,13 @@
     }, '');
     panel.appendChild(savedNote);
 
+    // На чём построен текст. Показываем отдельно: это и есть ответ на
+    // вопрос «откуда взялись сноски».
+    var sourcesNote = el('div', {
+      fontSize: '11px', opacity: '0.75', color: '#8fbf8f',
+    }, '');
+    panel.appendChild(sourcesNote);
+
     var out = el('div', {
       flex: '1', overflow: 'auto', background: '#000',
       border: '1px solid #444', padding: '10px', fontSize: '13px',
@@ -137,7 +144,10 @@
     input.focus();
 
     var busy = false;
-    var collected = [];   // готовые куски для экспорта
+    var collected = [];     // готовые куски для экспорта
+    // Публикации, на которых построен текст. Нужны при экспорте,
+    // чтобы маркеры [3] превратились в правильные сноски.
+    var usedSources = [];
     var pendingLegal = null;  // сверка ссылок, ждущая своего куска
 
     runBtn.onclick = function () {
@@ -220,6 +230,15 @@
 
     function handle(ev) {
       if (ev.outline) renderOutline(ev);
+      if (ev.sources) {
+        // Те же публикации, на которые ссылается текст. Их обязательно
+        // нужно передать при экспорте: номер [3] в разделе означает
+        // третий источник ИЗ ЭТОГО списка. Подбирать заново нельзя —
+        // выдача изменится, и сноски начнут врать.
+        usedSources = ev.sources;
+        sourcesNote.textContent = 'Опора: ' + ev.sources.length
+          + ' публикаций, ссылки на них станут сносками в документе.';
+      }
       if (ev.progress) {
         var p = ev.progress;
         status.textContent = 'Пишу ' + p.index + ' из ' + p.total
@@ -402,6 +421,8 @@
           sectionTitles: sectionTitles,
           // Титульный лист: то, что пользователь ввёл в настройках.
           // Тема берётся из настроек работы, а не из полей титула.
+          // Публикации сборки — по ним маркеры [3] станут сносками.
+          sources: usedSources,
           titlePage: Object.assign({}, settings.titlePage || {}, {
             topic: settings.topic || '',
             university: settings.university || (settings.titlePage || {}).university || '',

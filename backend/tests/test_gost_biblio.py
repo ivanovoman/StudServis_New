@@ -171,3 +171,77 @@ def test_russian_sources_go_before_latin():
 def test_duplicates_are_removed():
     text = format_list([article(), article()])
     assert len(text.splitlines()) == 1
+
+
+# --- подстрочные сноски -----------------------------------------------
+#
+# Отдельный стандарт (ГОСТ Р 7.0.5-2008), а не сокращение записи из
+# списка литературы: другие разделители и другой порядок имени.
+
+from app.modules.sources.gost_biblio import format_footnote  # noqa: E402
+
+
+def test_footnote_format():
+    assert format_footnote(article()) == (
+        "Рябов С. И. Некоторые проблемы пробелов и коллизий в праве "
+        "// Право и управление. 2024. № 9. С. 301–304."
+    )
+
+
+def test_footnote_has_no_comma_after_surname():
+    """В сноске «Рябов С. И.», в списке «Рябов, С. И.» — это разные ГОСТы."""
+    assert "Рябов С. И." in format_footnote(article())
+    assert "Рябов, С. И." not in format_footnote(article())
+
+
+def test_footnote_has_no_responsibility_block():
+    """Автор уже назван в начале — повторять его после косой черты незачем."""
+    assert " / " not in format_footnote(article())
+
+
+def test_footnote_uses_dots_not_dashes():
+    assert f" {DASH} " not in format_footnote(article())
+
+
+def test_footnote_single_page_when_given():
+    """Ссылаются на конкретное место, а не на всю статью целиком."""
+    assert "С. 303." in format_footnote(article(), page="303")
+    assert "301–304" not in format_footnote(article(), page="303")
+
+
+def test_footnote_falls_back_to_url():
+    record = format_footnote(article(pages="", venue=""))
+    assert "URL: https://cyberleninka.ru" in record
+
+
+def test_footnote_many_authors():
+    record = format_footnote(article(authors=[
+        "Первый А. А.", "Второй Б. Б.", "Третий В. В.", "Четвёртый Г. Г."]))
+    assert "[и др.]" in record
+
+
+# --- порядок имени в разных базах -------------------------------------
+
+def test_doaj_name_order_is_fixed():
+    """DOAJ пишет «Имя Отчество ФАМИЛИЯ» — фамилией становилось имя."""
+    assert surname_first("Наталия Владимировна ИЛЬЮТЧЕНКО") == \
+        "Ильютченко Наталия Владимировна"
+
+
+def test_patronymic_in_middle_means_surname_last():
+    assert surname_first("Анна Петровна СМИРНОВА") == "Смирнова Анна Петровна"
+
+
+def test_normal_russian_order_untouched():
+    assert surname_first("Вопленко Николай Николаевич") == \
+        "Вопленко Николай Николаевич"
+    assert surname_first("Смирнова Анна Петровна") == "Смирнова Анна Петровна"
+
+
+def test_initials_are_not_mistaken_for_surname():
+    """«А.А.» набрано прописными, но это не фамилия."""
+    assert surname_first("Кузнецов А.А.") == "Кузнецов А.А."
+
+
+def test_surname_first_in_caps_is_kept():
+    assert surname_first("ИВАНОВ Иван Иванович") == "ИВАНОВ Иван Иванович"

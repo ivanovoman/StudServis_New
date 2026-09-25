@@ -242,10 +242,10 @@ async function fetchSources(topic) {
  * сообщением — перед пользовательским, чтобы модель считала их
  * материалом, а не частью задания.
  */
-function withSources(messages, sourcesData) {
-  if (!sourcesData) return messages;
+function sourcesBlock(sourcesData) {
+  if (!sourcesData) return '';
 
-  const block = 'МАТЕРИАЛЫ ДЛЯ ОПОРЫ — реальные публикации, найденные '
+  return 'МАТЕРИАЛЫ ДЛЯ ОПОРЫ — реальные публикации, найденные '
     + 'по теме.\n\n'
     + sourcesData.prompt_block
     + '\n\nКАК ИМИ ПОЛЬЗОВАТЬСЯ:\n'
@@ -258,9 +258,23 @@ function withSources(messages, sourcesData) {
     + 'Наличие материалов не разрешает воспроизводить остальное по '
     + 'памяти.\n'
     + '- Если материалы теме не отвечают, так и напиши, а не '
-    + 'подгоняй тезисы под них.';
+    + 'подгоняй тезисы под них.\n'
+    + '- Ссылка обязательна там, где ты излагаешь чужую позицию, '
+    + 'приводишь определение или статистику. Своё рассуждение '
+    + 'помечать не нужно.\n'
+    + '- Если ссылаешься на конкретное место в статье, указывай '
+    + 'страницу: [2, с. 205]. Номер страницы бери только из самого '
+    + 'материала, не придумывай.';
+}
 
-  // Системный промпт идёт первым, источники — сразу за ним.
+/**
+ * Врезает найденные публикации отдельным системным сообщением — перед
+ * пользовательским, чтобы модель считала их материалом, а не частью
+ * задания.
+ */
+function withSources(messages, sourcesData) {
+  const block = sourcesBlock(sourcesData);
+  if (!block) return messages;
   return [messages[0], { role: 'system', content: block },
           ...messages.slice(1)];
 }
@@ -549,6 +563,19 @@ app.post('/api/assemble', async (req, res) => {
   const failed = [];    // что не получилось
   let aborted = false;
 
+  // Публикации подбираются ОДИН раз на всю работу. Так номера ссылок
+  // [1], [3] означают одно и то же в любом разделе — иначе сноска в
+  // третьем разделе указывала бы на чужую статью.
+  const sources = await fetchSources((settings && settings.topic) || plan.slice(0, 200));
+  if (sources) {
+    send({ sources: sources.sources });
+  } else {
+    send({
+      notice: 'Источники найти не удалось — работа будет написана по '
+            + 'знаниям модели, без сносок. Реквизиты проверьте сами.',
+    });
+  }
+
   // Итог по ссылкам на закон за всю работу — показываем в конце, чтобы
   // предупреждения, пролетевшие мимо глаз по ходу сборки, не пропали.
   const legalTotals = { checked: 0, wrong: 0, unclear: 0 };
@@ -577,7 +604,7 @@ app.post('/api/assemble', async (req, res) => {
     send({ progress: { index: i + 1, total: queue.length, title: task.heading || task.title } });
 
     try {
-      const raw = await writeFullPiece(task, { plan, settings, done }, send);
+      const raw = await writeFullPiece(task, { plan, settings, done, sources }, send);
 
       // Модель изредка мешает латиницу с кириллицей внутри слова
       // («kompetенции»). В готовой работе это брак, а глазами такое
@@ -843,7 +870,7 @@ async function writeFullPiece(task, ctx, send) {
  * борьбы с повторами достаточно знать, о чём уже сказано.
  */
 async function writePiece(task, ctx, opts = {}) {
-  const { plan, settings, done } = ctx;
+  const { plan, settings, done, sources } = ctx;
   const expand = opts.expand || null;
 
   const stepName = expand
@@ -858,6 +885,12 @@ async function writePiece(task, ctx, opts = {}) {
 
   const brief = buildBrief(settings || {});
   if (brief) messages.push({ role: 'system', content: brief });
+
+  // Найденные публикации — тем же блоком, что и на анализе темы.
+  // Без них модель пишет по памяти, и сослаться в тексте ей не на что:
+  // список литературы в конце работы выглядит тогда декорацией.
+  const srcBlock = sourcesBlock(sources);
+  if (srcBlock) messages.push({ role: 'system', content: srcBlock });
 
   // План целиком нужен всегда: из него видно место куска в работе.
   messages.push({
@@ -1011,7 +1044,7 @@ async function fetchBibliography(topic) {
 
 app.post('/api/export-docx-full', async (req, res) => {
   try {
-    const { topic, introduction, sections, conclusion, chapterTitles, sectionTitles, titlePage } = req.body;
+    const { topic, introduction, sections, conclusion, chapterTitles, sectionTitles, titlePage, sources } = req.body;
     if (!topic) {
       return res.status(400).json({ error: 'Нет темы работы для экспорта' });
     }
@@ -1032,6 +1065,10 @@ app.post('/api/export-docx-full', async (req, res) => {
       topic, introduction, sections, conclusion, chapterTitles, sectionTitles,
       bibliography,
       titlePage: hasTitleData ? titlePage : null,
+      // Источники приходят от клиента — ровно те, на которых построен
+      // текст. Подбирать их заново нельзя: выдача изменится, и сноска
+      // укажет на чужую статью.
+      sources: Array.isArray(sources) ? sources : [],
     });
     const filename = String(topic).slice(0, 60).replace(/[\\/:*?"<>|]/g, '_');
 

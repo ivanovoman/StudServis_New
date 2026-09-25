@@ -20,7 +20,8 @@
 
 const { Document, Packer, Paragraph, TextRun, Table, TableRow, TableCell,
         AlignmentType, BorderStyle, WidthType, PageBreak,
-        Footer, PageNumber } = require('docx');
+        Footer, PageNumber, FootnoteReferenceRun } = require('docx');
+const { parseMarkers } = require('./footnotes');
 
 // ---- Единицы измерения ----
 // docx использует DXA (1/20 пункта) для отступов/полей и полупункты (half-points)
@@ -30,6 +31,7 @@ const CM = 567; // 1 см в DXA
 const FONT = 'Times New Roman';
 const BODY_SIZE = 28;     // 14pt = 28 half-points
 const TABLE_SIZE = 22;    // 11pt = 22 half-points
+const FOOTNOTE_SIZE = 24; // 12pt — размер сносок по методичке
 const H1_SIZE = 32;       // 16pt — крупнее основного текста, но без жирности
 const H2_SIZE = 28;       // 14pt — как основной текст, просто отдельный абзац-заголовок
 
@@ -220,6 +222,48 @@ function makeBodyParagraphs(text) {
   return splitParagraphs(text).map(makeBodyParagraph);
 }
 
+/**
+ * Абзац, в котором маркеры [3] заменены ссылками на сноски.
+ *
+ * `refs` — накопитель: сюда складываются тексты сносок в порядке
+ * появления, а нумерация Word проставляет сама. Сквозная нумерация по
+ * всей работе получается автоматически, потому что накопитель один на
+ * документ.
+ */
+function makeBodyParagraphWithNotes(text, sources, refs) {
+  const { parts } = parseMarkers(text, sources.length);
+  if (!parts.some((p) => p.type === 'ref')) return makeBodyParagraph(text);
+
+  const children = [];
+  for (const part of parts) {
+    if (part.type === 'text') {
+      if (part.text) {
+        children.push(new TextRun({ text: fixDashes(part.text), size: BODY_SIZE, font: FONT }));
+      }
+      continue;
+    }
+    const source = sources[part.source - 1] || {};
+    // Описание берём из метаданных базы, а не из текста модели.
+    const note = part.page && source.footnoteTemplate
+      ? source.footnoteTemplate.replace(/С\. [\d–-]+\.$/, `С. ${part.page}.`)
+      : (source.footnote || source.footnoteTemplate || '');
+    refs.push(note);
+    children.push(new FootnoteReferenceRun(refs.length));
+  }
+
+  return new Paragraph({
+    children,
+    spacing: { before: 0, after: 0, line: 360 },
+    indent: { firstLine: 720 },
+    alignment: AlignmentType.JUSTIFIED,
+  });
+}
+
+function makeBodyParagraphsWithNotes(text, sources, refs) {
+  if (!sources || !sources.length) return makeBodyParagraphs(text);
+  return splitParagraphs(text).map((p) => makeBodyParagraphWithNotes(p, sources, refs));
+}
+
 // Таблица без заливки, 11pt, шапка по центру, тело по левому краю,
 // все границы 1.5pt (docx считает size границы в восьмых долях пункта: 1.5 * 8 = 12).
 function makeTable(tableRows) {
@@ -267,10 +311,11 @@ function makeTableCaption(number, title) {
 // если у раздела нет таблицы. Для обратной совместимости также принимает
 // markdown-строку напрямую (старый формат) — тогда заголовок таблицы не
 // добавляется, только сама таблица.
-function buildSectionBlocks(heading, text, tableData) {
+function buildSectionBlocks(heading, text, tableData, sources, refs) {
   const blocks = [];
   if (heading) blocks.push(makeH2(heading));
-  blocks.push(...makeBodyParagraphs(stripDuplicateHeading(text, heading)));
+  blocks.push(...makeBodyParagraphsWithNotes(
+    stripDuplicateHeading(text, heading), sources, refs));
 
   if (tableData) {
     const isLegacyStringFormat = typeof tableData === 'string';
@@ -451,7 +496,20 @@ function buildBibliography(entries, title) {
 
 // Поля страницы по ГОСТ: верх 2см, низ 2см, слева 3см (переплёт), справа 1.5см.
 function buildDocument(children, opts = {}) {
-  const { titlePage = false, marginRight = 1.5 * CM } = opts;
+  const { titlePage = false, marginRight = 1.5 * CM, footnotes = [] } = opts;
+
+  // Сноски: Times New Roman 12, одинарный интервал, по ширине — так
+  // требуют методички. Нумерация сквозная, её ведёт сам Word.
+  const footnoteMap = {};
+  footnotes.forEach((text, i) => {
+    footnoteMap[i + 1] = {
+      children: [new Paragraph({
+        alignment: AlignmentType.JUSTIFIED,
+        spacing: { before: 0, after: 0, line: 240 },
+        children: [new TextRun({ text: fixDashes(text || ''), size: FOOTNOTE_SIZE, font: FONT })],
+      })],
+    };
+  });
 
   // Номер страницы — полем PAGE, а не текстом: Word пересчитает его
   // сам, когда студент добавит абзац. Правый нижний угол без точки —
@@ -485,7 +543,8 @@ function buildDocument(children, opts = {}) {
       footers: titlePage ? { default: footer, first: new Footer({ children: [] }) }
                          : { default: footer },
       children,
-    }]
+    }],
+    footnotes: Object.keys(footnoteMap).length ? footnoteMap : undefined,
   });
 }
 
@@ -559,8 +618,11 @@ async function generateFragmentDocx({
  * извлечённые из текста плана на фронтенде. Если названия нет — используется
  * запасной вариант "ГЛАВА N" / просто номер раздела.
  */
-async function generateFullDocx({ topic, introduction, sections, conclusion, chapterTitles, sectionTitles, bibliography, titlePage, contentsTitle, bibliographyTitle, marginRight }) {
+async function generateFullDocx({ topic, introduction, sections, conclusion, chapterTitles, sectionTitles, bibliography, titlePage, contentsTitle, bibliographyTitle, marginRight, sources }) {
   const children = [];
+  // Накопитель сносок один на документ — отсюда сквозная нумерация.
+  const notes = [];
+  const srcs = sources || [];
   const refs = (bibliography || []).filter((x) => String(x || '').trim());
   const contentsName = contentsTitle || 'СОДЕРЖАНИЕ';
   const refsName = bibliographyTitle || 'СПИСОК ЛИТЕРАТУРЫ';
@@ -573,7 +635,8 @@ async function generateFullDocx({ topic, introduction, sections, conclusion, cha
 
   // ВВЕДЕНИЕ — H1 с разрывом страницы после СОДЕРЖАНИЯ
   children.push(...makeH1('ВВЕДЕНИЕ', { pageBreakBefore: true }));
-  children.push(...makeBodyParagraphs(stripDuplicateHeading(introduction, 'Введение')));
+  children.push(...makeBodyParagraphsWithNotes(
+    stripDuplicateHeading(introduction, 'Введение'), srcs, notes));
 
   // Группируем разделы по номеру главы (всё до первой точки)
   let lastChapterNum = null;
@@ -588,18 +651,20 @@ async function generateFullDocx({ topic, introduction, sections, conclusion, cha
     const sectionNum = s.number ? String(s.number) : null;
     const sectionName = sectionTitles && sectionNum && sectionTitles[sectionNum];
     const sectionHeading = sectionName ? `${sectionNum}. ${sectionName}` : sectionNum;
-    children.push(...buildSectionBlocks(sectionHeading, s.text, s.table));
+    children.push(...buildSectionBlocks(sectionHeading, s.text, s.table, srcs, notes));
   }
 
   // ЗАКЛЮЧЕНИЕ — новый H1 с разрывом страницы
   children.push(...makeH1('ЗАКЛЮЧЕНИЕ', { pageBreakBefore: true }));
-  children.push(...makeBodyParagraphs(stripDuplicateHeading(conclusion, 'Заключение')));
+  children.push(...makeBodyParagraphsWithNotes(
+    stripDuplicateHeading(conclusion, 'Заключение'), srcs, notes));
 
   children.push(...buildBibliography(refs, refsName));
 
   const doc = buildDocument(children, {
     titlePage: Boolean(titlePage),
     marginRight: marginRight || 1.5 * CM,
+    footnotes: notes,
   });
   return Packer.toBuffer(doc);
 }
