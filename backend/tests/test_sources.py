@@ -507,31 +507,67 @@ class TestRegistry:
         got = rank([fresh, old], "субсидиарная ответственность")
         assert got[0] is old
 
-    def test_one_provider_failing_does_not_break(self, monkeypatch):
+    @staticmethod
+    def _silence_network(monkeypatch, **overrides):
+        """Глушит все базы разом.
+
+        Баз стало четыре, и подменять их поимённо в каждом тесте —
+        верный способ однажды забыть одну и незаметно уйти в сеть:
+        тест станет зависеть от настроения чужого сервера.
+        """
         from app.modules.sources import registry
 
+        empty = lambda *a, **k: []                            # noqa: E731
+        defaults = {
+            "openalex": (registry.openalex, "find_sources_for_topic"),
+            "cyberleninka": (registry.cyberleninka, "find_sources"),
+            "crossref": (registry.crossref, "find_sources"),
+            "doaj": (registry.doaj, "find_sources"),
+        }
+        for name, (module, attr) in defaults.items():
+            monkeypatch.setattr(module, attr, overrides.get(name, empty))
+        return registry
+
+    def test_one_provider_failing_does_not_break(self, monkeypatch):
         def boom(*a, **k):
             raise RuntimeError("openalex down")
 
-        monkeypatch.setattr(registry.openalex, "find_sources_for_topic", boom)
-        monkeypatch.setattr(
-            registry.cyberleninka, "find_sources",
-            lambda *a, **k: [src("Субсидиарная ответственность", doi=None)])
+        registry = self._silence_network(
+            monkeypatch,
+            openalex=boom,
+            cyberleninka=lambda *a, **k: [
+                src("Субсидиарная ответственность", doi=None)],
+        )
         got = asyncio.run(registry.find_sources(
             "субсидиарная ответственность", [], with_fulltext=False))
         assert len(got) == 1
 
-    def test_both_failing_gives_empty(self, monkeypatch):
-        from app.modules.sources import registry
-
+    def test_all_failing_gives_empty(self, monkeypatch):
         def boom(*a, **k):
             raise RuntimeError("down")
 
-        monkeypatch.setattr(registry.openalex, "find_sources_for_topic", boom)
-        monkeypatch.setattr(registry.cyberleninka, "find_sources", boom)
+        registry = self._silence_network(
+            monkeypatch, openalex=boom, cyberleninka=boom,
+            crossref=boom, doaj=boom)
         got = asyncio.run(
             registry.find_sources("тема", [], with_fulltext=False))
         assert got == []
+
+    def test_every_provider_reaches_the_pool(self, monkeypatch):
+        """Новую базу легко подключить и забыть позвать."""
+        def from_base(name):
+            return lambda *a, **k: [src(f"Статья из {name}", doi=f"10/{name}")]
+
+        registry = self._silence_network(
+            monkeypatch,
+            openalex=from_base("openalex"),
+            cyberleninka=from_base("cyberleninka"),
+            crossref=from_base("crossref"),
+            doaj=from_base("doaj"),
+        )
+        got = asyncio.run(registry.find_sources(
+            "статья", [], limit=10, with_fulltext=False))
+        assert len(got) == 4
 
 
 class TestFulltextInPrompt:

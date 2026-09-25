@@ -6,8 +6,24 @@ OpenAlex даёт DOI, счётчик цитирований и честный �
 целиком русскоязычная и отдаёт полные тексты, но без DOI, без
 цитируемости и без фильтра по дате.
 
-Поэтому базы складываются, а не заменяют друг друга: ищем в обеих,
-сливаем по нормализованному заголовку, ранжируем общим ключом.
+Поэтому базы складываются, а не заменяют друг друга: ищем во всех
+сразу, сливаем по нормализованному заголовку, ранжируем общим ключом.
+
+Кто за что отвечает:
+
+* **КиберЛенинка** — русская периодика и полные тексты. Основа выдачи
+  по гуманитарным и юридическим темам;
+* **OpenAlex** — мировая наука, цитируемость, фильтр по годам. Требует
+  бесплатного ключа (с февраля 2026);
+* **Crossref** — точная библиография по DOI, включая российские ваковские
+  журналы. Из неё собирается список литературы: реквизиты, которые
+  модель иначе придумывает;
+* **DOAJ** — журналы гарантированно открытого доступа с длинными
+  абстрактами. Записей по русскому праву немного, но те, что есть,
+  открываются без платной стены.
+
+Базы опрашиваются параллельно. Отказ любой из них не роняет поиск и не
+проходит молча — каждая пишет о своей беде в лог.
 """
 
 from __future__ import annotations
@@ -16,7 +32,7 @@ import asyncio
 from datetime import date
 from typing import Iterable
 
-from app.modules.sources import cyberleninka, openalex
+from app.modules.sources import crossref, cyberleninka, doaj, openalex
 from app.modules.sources.openalex import (
     Source, deduplicate, normalize_title, relevance)
 
@@ -128,7 +144,8 @@ async def find_sources(
     years_back: int = DEFAULT_YEARS_BACK,
     min_relevance: float = 0.3,
     with_fulltext: bool = True,
-    providers: tuple[str, ...] = ("openalex", "cyberleninka"),
+    providers: tuple[str, ...] = ("openalex", "cyberleninka",
+                                  "crossref", "doaj"),
 ) -> list[Source]:
     """Найти источники по теме сразу в нескольких базах.
 
@@ -148,6 +165,14 @@ async def find_sources(
             cyberleninka.find_sources,
             topic, directions, min_year=since,
             min_relevance=min_relevance, limit=limit * 3))
+    if "crossref" in providers:
+        tasks.append(asyncio.to_thread(
+            crossref.find_sources,
+            topic, directions, min_year=since, limit=limit * 2))
+    if "doaj" in providers:
+        tasks.append(asyncio.to_thread(
+            doaj.find_sources,
+            topic, directions, min_year=since, limit=limit * 2))
 
     if not tasks:
         return []

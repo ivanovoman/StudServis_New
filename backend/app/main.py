@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import os
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
@@ -35,6 +36,14 @@ async def lifespan(_app: FastAPI):
     ГОСТ-экспорт, детектор — работают и нужны.
     """
     from app.db import init_models
+
+    # Ключи из .env читает pydantic, а модули научных баз — обычное
+    # окружение. Прокидываем, иначе ключ лежит в файле и не работает:
+    # именно так OpenAlex однажды и «перестал искать».
+    if settings.openalex_api_key:
+        os.environ.setdefault("OPENALEX_API_KEY", settings.openalex_api_key)
+    if settings.openalex_email:
+        os.environ.setdefault("OPENALEX_EMAIL", settings.openalex_email)
 
     try:
         await init_models()

@@ -33,6 +33,12 @@ class Settings(BaseSettings):
     # Пустая строка = взять первую модель из models.yaml.
     openrouter_model: str = ""
 
+    # ---- Научные базы ----
+    # Ключ OpenAlex бесплатный (openalex.org/settings/api). Без него с
+    # февраля 2026 база отвечает отказом почти на каждый запрос.
+    openalex_api_key: str = ""
+    openalex_email: str = "dev@studservis.ru"
+
     # ---- PostgreSQL ----
     postgres_host: str = "localhost"
     postgres_port: int = 5432
