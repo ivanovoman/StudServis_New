@@ -829,7 +829,10 @@
     btn.setAttribute('data-action', 'payments');
     btn.textContent = '₽ Оплата';
     btn.style.cursor = 'pointer';
-    btn.title = 'Тарифы и оплата. Анализ темы и план — бесплатны.';
+    btn.title = 'Тарифы и оплата. Разбор темы и план — бесплатны.';
+    // Прячем до ответа сервера: показывать кнопку оплаты, которая
+    // ничего не может, хуже, чем не показывать её вовсе.
+    btn.style.display = 'none';
 
     btn.addEventListener('click', function () {
       if (!window.StudPayments) {
@@ -840,6 +843,16 @@
     });
 
     settingsBtn.parentNode.insertBefore(btn, settingsBtn.nextSibling);
+
+    // Кнопка появляется, только когда магазин действительно подключён.
+    // Пока ключей нет, весь сервис работает без оплаты, и напоминать о
+    // ней незачем.
+    fetch('/api/v1/payments/tariffs')
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (data) {
+        if (data && data.configured) btn.style.display = '';
+      })
+      .catch(function () { /* нет бэкенда — нет и оплаты */ });
   }
 
   // Кнопка настроек тускнеет, когда активный пункт в них не нуждается.
