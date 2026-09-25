@@ -78,7 +78,7 @@ def notification(external_id: str, status: str = "succeeded") -> dict:
             "object": {"id": external_id, "status": status, "paid": True}}
 
 
-def gateway_says(status="succeeded", paid=True, amount="490.00"):
+def gateway_says(status="succeeded", paid=True, amount="290.00"):
     """Заглушка ответа ЮKassa на запрос о платеже."""
     def fetch(payment_id, **kw):
         return {"id": payment_id, "status": status, "paid": paid,
@@ -126,7 +126,7 @@ def test_subscription_grants_unlimited(client, monkeypatch):
     asyncio.run(_make_payment(user_id, "month", "yoo-sub"))
 
     monkeypatch.setattr(service.gateway, "get_payment",
-                        gateway_says(amount="1490.00"))
+                        gateway_says(amount="590.00"))
     client.post("/api/v1/payments/webhook", json=notification("yoo-sub"),
                 headers={"X-Forwarded-For": YOOKASSA_IP})
 
@@ -233,7 +233,7 @@ def test_subscription_is_not_spent(client, monkeypatch):
     _, user_id = new_user(client)
     asyncio.run(_make_payment(user_id, "month", "yoo-sub2"))
     monkeypatch.setattr(service.gateway, "get_payment",
-                        gateway_says(amount="1490.00"))
+                        gateway_says(amount="590.00"))
     client.post("/api/v1/payments/webhook", json=notification("yoo-sub2"),
                 headers={"X-Forwarded-For": YOOKASSA_IP})
 
@@ -259,8 +259,8 @@ def test_tariffs_are_public(client):
 
 def test_price_has_two_decimals():
     """ЮKassa принимает сумму строкой вида «490.00»."""
-    assert get_tariff("single").price_rubles == "490.00"
-    assert get_tariff("month").price_rubles == "1490.00"
+    assert get_tariff("single").price_rubles == "290.00"
+    assert get_tariff("month").price_rubles == "590.00"
 
 
 def test_access_requires_login(client):

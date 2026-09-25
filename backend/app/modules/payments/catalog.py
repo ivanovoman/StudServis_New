@@ -43,7 +43,7 @@ class Tariff:
 
     @property
     def price_rubles(self) -> str:
-        """Цена строкой для ЮKassa: «490.00»."""
+        """Цена строкой для ЮKassa: «290.00»."""
         return f"{self.price_kopecks // 100}.{self.price_kopecks % 100:02d}"
 
     @property
@@ -56,7 +56,7 @@ TARIFFS: dict[str, Tariff] = {
     "single": Tariff(
         code="single",
         title="Одна работа",
-        price_kopecks=49000,          # 490 ₽
+        price_kopecks=29000,          # 290 ₽
         works=1,
         days=None,
         description="Сборка одной работы целиком и выгрузка в Word. "
@@ -65,7 +65,7 @@ TARIFFS: dict[str, Tariff] = {
     "month": Tariff(
         code="month",
         title="Подписка на месяц",
-        price_kopecks=149000,         # 1490 ₽
+        price_kopecks=59000,          # 590 ₽
         works=None,
         days=30,
         description="Сколько угодно работ в течение 30 дней.",
