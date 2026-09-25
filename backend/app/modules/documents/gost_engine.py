@@ -21,6 +21,7 @@
 from __future__ import annotations
 
 import re
+from datetime import date
 from io import BytesIO
 from typing import Iterable, Mapping, Sequence
 
@@ -42,6 +43,7 @@ H1_SIZE = Pt(16)
 H2_SIZE = Pt(14)
 
 LINE_SPACING = 1.5
+DASH_CHAR = "\u2013"   # тире, которого требует ГОСТ
 FIRST_LINE_INDENT = Twips(720)   # 1.25 см — красная строка
 CONTENTS_INDENT = Twips(720)     # отступ разделов в СОДЕРЖАНИИ
 
@@ -317,14 +319,178 @@ def _iter_chapters(sections: Iterable[Mapping]):
         yield new_chapter, s
 
 
+def _title_line(doc: Document, text: str = "", *, align=WD_ALIGN_PARAGRAPH.CENTER,
+                bold: bool = False, size=None, caps: bool = False,
+                spacing_after: int = 0):
+    """Строка титульного листа.
+
+    Титул верстается одиночными строками, а не абзацами: интервал здесь
+    полуторный не нужен, а положение блоков задаётся пустыми строками —
+    так же, как это делают в Word руками.
+    """
+    p = doc.add_paragraph()
+    _zero_spacing(p)
+    p.paragraph_format.line_spacing = 1.0
+    p.paragraph_format.first_line_indent = Cm(0)
+    p.paragraph_format.space_after = Pt(spacing_after)
+    p.alignment = align
+    run = p.add_run(fix_dashes(text.upper() if caps else text))
+    _style_run(run, size or BODY_SIZE)
+    run.bold = bold
+    return p
+
+
+def _underline_hint(doc: Document, left: str, right: str):
+    """Строка с подписью и пояснением под ней мелким шрифтом.
+
+    На бумажном титуле под чертой всегда стоит пояснение — «(подпись)»,
+    «(инициалы, фамилия)». Без него лист выглядит недоделанным.
+    """
+    p = doc.add_paragraph()
+    _zero_spacing(p)
+    p.paragraph_format.line_spacing = 1.0
+    p.paragraph_format.first_line_indent = Cm(0)
+    p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    _style_run(p.add_run(f"{left}          {right}"), Pt(10))
+    return p
+
+
+def add_page_numbers(doc: Document, *, skip_first: bool = True) -> None:
+    """Нумерация страниц в правом нижнем углу.
+
+    Методички формулируют это одинаково: «номер страницы проставляется
+    в правом нижнем углу листа без точки; титульный лист считают первой
+    страницей, но номер на нём не ставится».
+
+    Номер вставляется полем PAGE, а не текстом: Word пересчитает его
+    сам, когда студент добавит или уберёт абзац. Пропуск номера на
+    первой странице — стандартный флаг titlePg в свойствах раздела.
+    """
+    section = doc.sections[0]
+    section.different_first_page_header_footer = skip_first
+
+    footer = section.footer
+    footer.is_linked_to_previous = False
+
+    p = footer.paragraphs[0] if footer.paragraphs else footer.add_paragraph()
+    p.text = ""
+    p.alignment = WD_ALIGN_PARAGRAPH.RIGHT
+    _zero_spacing(p)
+
+    run = p.add_run()
+    _style_run(run, BODY_SIZE)
+
+    # Поле PAGE собирается из трёх узлов: начало, инструкция, конец.
+    begin = OxmlElement("w:fldChar")
+    begin.set(qn("w:fldCharType"), "begin")
+
+    instr = OxmlElement("w:instrText")
+    instr.set(qn("xml:space"), "preserve")
+    instr.text = "PAGE"
+
+    end = OxmlElement("w:fldChar")
+    end.set(qn("w:fldCharType"), "end")
+
+    run._r.append(begin)
+    run._r.append(instr)
+    run._r.append(end)
+
+
+def build_title_page(doc: Document, info: Mapping | None) -> None:
+    """Титульный лист.
+
+    Сделан по образцу из методички МФЮА (приложение 2), но поля все
+    настраиваемые: у каждого вуза свой титул, и жёстко зашивать один —
+    значит сделать сервис пригодным ровно для одного вуза.
+
+    Незаполненные поля оставляют пустое место с подчёркиванием, а не
+    выдуманные данные: имя научного руководителя придумывать нельзя, а
+    дописать его ручкой — нормальная практика.
+    """
+    info = dict(info or {})
+
+    university = info.get("university") or ""
+    if university:
+        _title_line(doc, university, bold=True, caps=True)
+
+    for key, label in (("department", ""), ("faculty", "")):
+        if info.get(key):
+            _title_line(doc, f"{label}{info[key]}")
+
+    if info.get("direction"):
+        _title_line(doc, f"Направление / специальность: {info['direction']}")
+    if info.get("profile"):
+        _title_line(doc, f"Профиль / специализация: {info['profile']}")
+
+    # Блок допуска к защите — только для выпускных работ. В курсовой
+    # его нет, и пустая графа «Заведующий кафедрой» там выглядит нелепо.
+    if info.get("with_defence_block"):
+        _title_line(doc)
+        _title_line(doc, "К ЗАЩИТЕ", align=WD_ALIGN_PARAGRAPH.RIGHT)
+        _title_line(doc, "(РЕКОМЕНДОВАНО / НЕ РЕКОМЕНДОВАНО)",
+                    align=WD_ALIGN_PARAGRAPH.RIGHT, size=Pt(10))
+        _title_line(doc, "Заведующий кафедрой ______________",
+                    align=WD_ALIGN_PARAGRAPH.RIGHT)
+        _title_line(doc, "«____» ______________ 20____ г.",
+                    align=WD_ALIGN_PARAGRAPH.RIGHT)
+
+    for _ in range(4):
+        _title_line(doc)
+
+    _title_line(doc, info.get("work_type") or "КУРСОВАЯ РАБОТА",
+                bold=True, caps=True, size=H1_SIZE)
+    _title_line(doc)
+    _title_line(doc, "на тему:")
+
+    topic = (info.get("topic") or "").strip()
+    if topic:
+        _title_line(doc, f"«{topic.rstrip('.')}»", bold=True)
+
+    if info.get("discipline"):
+        _title_line(doc)
+        _title_line(doc, f"по дисциплине: {info['discipline']}")
+
+    for _ in range(4):
+        _title_line(doc)
+
+    # Исполнитель и руководитель прижаты вправо — так на всех образцах.
+    student = info.get("student") or "____________________"
+    _title_line(doc, f"Выполнил(а): {student}",
+                align=WD_ALIGN_PARAGRAPH.RIGHT)
+    if info.get("group"):
+        _title_line(doc, f"Группа: {info['group']}",
+                    align=WD_ALIGN_PARAGRAPH.RIGHT)
+    if info.get("student_id"):
+        _title_line(doc, f"Индивидуальный номер (ИНС): {info['student_id']}",
+                    align=WD_ALIGN_PARAGRAPH.RIGHT)
+
+    _title_line(doc)
+    supervisor = info.get("supervisor") or "____________________"
+    _title_line(doc, f"Руководитель: {supervisor}",
+                align=WD_ALIGN_PARAGRAPH.RIGHT)
+    _title_line(doc, "«____» ______________ 20____ г.",
+                align=WD_ALIGN_PARAGRAPH.RIGHT)
+
+    # Город и год внизу листа. Считаем строки грубо: точная вёрстка
+    # здесь невозможна, длина темы у всех разная.
+    for _ in range(5):
+        _title_line(doc)
+
+    city = info.get("city") or "Москва"
+    year = info.get("year") or date.today().year
+    _title_line(doc, f"{city} {DASH_CHAR} {year}")
+
+
 def build_contents_page(
     doc: Document,
     sections: Sequence[Mapping] | None,
     chapter_titles: Mapping[str, str] | None,
     section_titles: Mapping[str, str] | None,
     with_bibliography: bool = False,
+    title: str = "СОДЕРЖАНИЕ",
+    bibliography_title: str = "СПИСОК ЛИТЕРАТУРЫ",
 ) -> None:
-    add_h1(doc, "СОДЕРЖАНИЕ", page_break_before=False)
+    add_h1(doc, title, page_break_before=False)
     add_contents_line(doc, "ВВЕДЕНИЕ")
 
     for new_chapter, s in _iter_chapters(sections or []):
@@ -342,7 +508,7 @@ def build_contents_page(
 
     add_contents_line(doc, "ЗАКЛЮЧЕНИЕ")
     if with_bibliography:
-        add_contents_line(doc, "СПИСОК ЛИТЕРАТУРЫ")
+        add_contents_line(doc, bibliography_title)
 
 
 def _new_document() -> Document:
@@ -437,7 +603,8 @@ def generate_fragment_docx(
     return buf.getvalue()
 
 
-def add_bibliography(doc: Document, entries: Sequence[str] | None) -> None:
+def add_bibliography(doc: Document, entries: Sequence[str] | None,
+                     *, title: str = "СПИСОК ЛИТЕРАТУРЫ") -> None:
     """Раздел «СПИСОК ЛИТЕРАТУРЫ».
 
     Записи приходят уже готовыми — собранными по ГОСТ Р 7.0.100-2018 из
@@ -455,7 +622,7 @@ def add_bibliography(doc: Document, entries: Sequence[str] | None) -> None:
     if not records:
         return
 
-    add_h1(doc, "СПИСОК ЛИТЕРАТУРЫ", page_break_before=True)
+    add_h1(doc, title, page_break_before=True)
 
     for number, record in enumerate(records, 1):
         # Если запись уже пронумерована, своей нумерации не добавляем:
@@ -478,6 +645,9 @@ def generate_full_docx(
     chapter_titles: Mapping[str, str] | None = None,
     section_titles: Mapping[str, str] | None = None,
     bibliography: Sequence[str] | None = None,
+    title_page: Mapping | None = None,
+    contents_title: str = "СОДЕРЖАНИЕ",
+    bibliography_title: str = "СПИСОК ЛИТЕРАТУРЫ",
 ) -> bytes:
     """DOCX всей работы: СОДЕРЖАНИЕ, ВВЕДЕНИЕ, главы, ЗАКЛЮЧЕНИЕ, СПИСОК.
 
@@ -490,8 +660,17 @@ def generate_full_docx(
     # в содержании строку «СПИСОК ЛИТЕРАТУРЫ», за которой ничего нет.
     refs = [str(e).strip() for e in (bibliography or []) if str(e).strip()]
 
+    # Титул идёт до содержания и не нумеруется — но считается первой
+    # страницей, поэтому содержание получает номер 2, как и требуют
+    # методички.
+    if title_page:
+        build_title_page(doc, title_page)
+        doc.add_paragraph().add_run().add_break(WD_BREAK.PAGE)
+
     build_contents_page(doc, sections, chapter_titles, section_titles,
-                        with_bibliography=bool(refs))
+                        with_bibliography=bool(refs),
+                        title=contents_title,
+                        bibliography_title=bibliography_title)
 
     add_h1(doc, "ВВЕДЕНИЕ", page_break_before=True)
     add_body_paragraphs(doc, strip_duplicate_heading(introduction, "Введение"))
@@ -509,7 +688,9 @@ def generate_full_docx(
     add_h1(doc, "ЗАКЛЮЧЕНИЕ", page_break_before=True)
     add_body_paragraphs(doc, strip_duplicate_heading(conclusion, "Заключение"))
 
-    add_bibliography(doc, refs)
+    add_bibliography(doc, refs, title=bibliography_title)
+
+    add_page_numbers(doc, skip_first=bool(title_page))
 
     buf = BytesIO()
     doc.save(buf)

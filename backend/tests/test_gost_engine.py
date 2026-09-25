@@ -404,3 +404,98 @@ def test_existing_numbering_is_not_doubled():
         bibliography=["1. Иванов, И. И. Работа.", "2. Петров, П. П. Труд."]))
     assert "1. Иванов, И. И. Работа." in texts
     assert not any(t.startswith("1. 1.") for t in texts)
+
+
+# --- титульный лист ---------------------------------------------------
+#
+# Образец взят из методички МФЮА (приложение 2), но поля настраиваемые:
+# у каждого вуза свой титул.
+
+TITLE = {
+    "university": "Московский финансово-юридический университет МФЮА",
+    "department": "Кафедра гражданско-правовых дисциплин",
+    "direction": "40.04.01 Юриспруденция",
+    "work_type": "Магистерская диссертация",
+    "topic": "Коллизии в праве",
+    "student": "Иванов И. И.",
+    "group": "ЮРм-101",
+    "supervisor": "к.ю.н., доц. Петров П. П.",
+    "city": "Москва",
+    "year": 2026,
+}
+
+
+def _full(**kw):
+    base = dict(topic="Т", introduction="В.", sections=[], conclusion="З.")
+    base.update(kw)
+    return _paragraphs(generate_full_docx(**base))
+
+
+def test_title_page_has_all_parts():
+    texts = _full(title_page=TITLE)
+    joined = "\n".join(texts)
+    for expected in ("МОСКОВСКИЙ ФИНАНСОВО-ЮРИДИЧЕСКИЙ УНИВЕРСИТЕТ МФЮА",
+                     "Кафедра гражданско-правовых дисциплин",
+                     "МАГИСТЕРСКАЯ ДИССЕРТАЦИЯ",
+                     "«Коллизии в праве»",
+                     "Выполнил(а): Иванов И. И.",
+                     "Руководитель: к.ю.н., доц. Петров П. П."):
+        assert expected in joined
+
+
+def test_title_page_city_and_year():
+    assert "Москва – 2026" in _full(title_page=TITLE)
+
+
+def test_title_page_comes_first():
+    """Титул обязан быть до содержания, иначе это не титул."""
+    texts = _full(title_page=TITLE, bibliography=["Иванов, И. И. Труд."])
+    assert texts.index("МАГИСТЕРСКАЯ ДИССЕРТАЦИЯ") < texts.index("СОДЕРЖАНИЕ")
+
+
+def test_no_title_page_by_default():
+    """Курсовую часто сдают без титула от сервиса — не навязываем."""
+    assert "Выполнил(а)" not in "\n".join(_full())
+
+
+def test_empty_fields_leave_blank_line():
+    """Фамилию руководителя выдумывать нельзя — оставляем прочерк."""
+    texts = _full(title_page={"topic": "Т", "work_type": "Курсовая работа"})
+    assert any("Руководитель: ______" in t for t in texts)
+
+
+def test_defence_block_only_when_asked():
+    """В курсовой графа «Заведующий кафедрой» выглядит нелепо."""
+    assert "К ЗАЩИТЕ" not in "\n".join(_full(title_page=TITLE))
+    with_block = dict(TITLE, with_defence_block=True)
+    assert "К ЗАЩИТЕ" in "\n".join(_full(title_page=with_block))
+
+
+def test_section_names_are_configurable():
+    """МФЮА требует «ОГЛАВЛЕНИЕ» и «СПИСОК ИСПОЛЬЗУЕМЫХ ИСТОЧНИКОВ»."""
+    texts = _full(bibliography=["Иванов, И. И. Труд."],
+                  contents_title="ОГЛАВЛЕНИЕ",
+                  bibliography_title="СПИСОК ИСПОЛЬЗУЕМЫХ ИСТОЧНИКОВ")
+    assert "ОГЛАВЛЕНИЕ" in texts
+    assert "СОДЕРЖАНИЕ" not in texts
+    assert texts.count("СПИСОК ИСПОЛЬЗУЕМЫХ ИСТОЧНИКОВ") == 2
+
+
+def test_page_numbers_are_added():
+    """Методичка: номер в правом нижнем углу, полем, а не текстом."""
+    from docx import Document as Doc
+    from io import BytesIO
+    doc = Doc(BytesIO(generate_full_docx(
+        topic="Т", introduction="В.", sections=[], conclusion="З.")))
+    footer = doc.sections[0].footer.paragraphs[0]
+    assert "PAGE" in footer._p.xml
+
+
+def test_title_page_is_not_numbered():
+    """Титул считают первой страницей, но номер на нём не ставят."""
+    from docx import Document as Doc
+    from io import BytesIO
+    doc = Doc(BytesIO(generate_full_docx(
+        topic="Т", introduction="В.", sections=[], conclusion="З.",
+        title_page=TITLE)))
+    assert doc.sections[0].different_first_page_header_footer is True

@@ -1011,7 +1011,7 @@ async function fetchBibliography(topic) {
 
 app.post('/api/export-docx-full', async (req, res) => {
   try {
-    const { topic, introduction, sections, conclusion, chapterTitles, sectionTitles } = req.body;
+    const { topic, introduction, sections, conclusion, chapterTitles, sectionTitles, titlePage } = req.body;
     if (!topic) {
       return res.status(400).json({ error: 'Нет темы работы для экспорта' });
     }
@@ -1023,7 +1023,16 @@ app.post('/api/export-docx-full', async (req, res) => {
       ? req.body.bibliography
       : await fetchBibliography(topic);
 
-    const buffer = await generateFullDocx({ topic, introduction, sections, conclusion, chapterTitles, sectionTitles, bibliography });
+    // Титул строится, только если пользователь что-то о себе сообщил:
+    // лист с одними прочерками никому не нужен.
+    const hasTitleData = titlePage && Object.keys(titlePage)
+      .some((k) => k !== 'topic' && String(titlePage[k] || '').trim());
+
+    const buffer = await generateFullDocx({
+      topic, introduction, sections, conclusion, chapterTitles, sectionTitles,
+      bibliography,
+      titlePage: hasTitleData ? titlePage : null,
+    });
     const filename = String(topic).slice(0, 60).replace(/[\\/:*?"<>|]/g, '_');
 
     res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document');

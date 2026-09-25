@@ -400,6 +400,12 @@
           sections: sections,
           conclusion: conclusion,
           sectionTitles: sectionTitles,
+          // Титульный лист: то, что пользователь ввёл в настройках.
+          // Тема берётся из настроек работы, а не из полей титула.
+          titlePage: Object.assign({}, settings.titlePage || {}, {
+            topic: settings.topic || '',
+            university: settings.university || (settings.titlePage || {}).university || '',
+          }),
         }),
       })
         .then(function (r) {

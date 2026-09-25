@@ -56,6 +56,14 @@ class FullRequest(BaseModel):
     #: из браузера, не разбирая на элементы.
     bibliography: list[str] | str | None = None
 
+    #: Данные титульного листа. Пустой словарь означает «без титула»:
+    #: лист с одними прочерками никому не нужен.
+    title_page: dict | None = None
+    #: Названия разделов: у МФЮА, например, «ОГЛАВЛЕНИЕ» и «СПИСОК
+    #: ИСПОЛЬЗУЕМЫХ ИСТОЧНИКОВ» вместо привычных.
+    contents_title: str = "СОДЕРЖАНИЕ"
+    bibliography_title: str = "СПИСОК ЛИТЕРАТУРЫ"
+
     @field_validator("bibliography")
     @classmethod
     def _split_lines(cls, value):
@@ -108,5 +116,8 @@ async def export_full(payload: FullRequest) -> Response:
         chapter_titles=payload.chapter_titles,
         section_titles=payload.section_titles,
         bibliography=payload.bibliography,
+        title_page=payload.title_page,
+        contents_title=payload.contents_title,
+        bibliography_title=payload.bibliography_title,
     )
     return _docx_response(data, payload.topic or "Курсовая работа")

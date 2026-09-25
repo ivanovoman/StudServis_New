@@ -56,7 +56,29 @@
     // может прямо требовать две.
     chapters: null,
     sources: [],   // [{filename, chars, title}]
+    // Данные титульного листа. Вводятся один раз и переживают
+    // перезагрузку страницы: набирать ФИО и кафедру каждый раз заново —
+    // издевательство.
+    titlePage: loadTitlePage(),
   };
+
+  var TITLE_KEY = 'studrabots.titlePage';
+
+  function loadTitlePage() {
+    try {
+      return JSON.parse(localStorage.getItem(TITLE_KEY) || '{}') || {};
+    } catch (e) {
+      return {};
+    }
+  }
+
+  function saveTitlePage(data) {
+    try {
+      localStorage.setItem(TITLE_KEY, JSON.stringify(data || {}));
+    } catch (e) {
+      // Приватный режим браузера — не беда, настройки проживут вкладку.
+    }
+  }
 
   function settingsFilled() {
     return settings.topic.trim().length >= 5;
@@ -535,6 +557,50 @@
     wishes.placeholder = 'Например: две главы, больше судебной практики, без таблиц';
     panel.appendChild(fieldRow('Пожелания к работе', wishes));
 
+    // --- титульный лист
+    //
+    // Данные вводятся один раз и хранятся в браузере. Пустые поля
+    // превращаются в подчёркнутое место — вписать ручкой нормально,
+    // а вот выдуманная фамилия руководителя недопустима.
+    panel.appendChild(el('div', {
+      borderTop: '1px solid #444', marginTop: '4px', paddingTop: '8px',
+      fontWeight: 'bold', letterSpacing: '1px',
+    }, '▓ ТИТУЛЬНЫЙ ЛИСТ ▓'));
+
+    var tp = settings.titlePage || {};
+    var titleFields = {};
+
+    [
+      ['workType', 'Вид работы', 'Курсовая работа / Магистерская диссертация'],
+      ['department', 'Кафедра', 'Кафедра гражданско-правовых дисциплин'],
+      ['direction', 'Направление, специальность', '40.03.01 Юриспруденция'],
+      ['profile', 'Профиль', 'Правовое обеспечение бизнеса'],
+      ['discipline', 'Дисциплина', 'Теория государства и права'],
+      ['student', 'ФИО обучающегося', 'Иванов Иван Иванович'],
+      ['group', 'Группа', 'ЮР-301'],
+      ['studentId', 'Индивидуальный номер (ИНС)', 'при наличии'],
+      ['supervisor', 'Руководитель', 'к.ю.н., доцент Петров П. П.'],
+      ['city', 'Город', 'Москва'],
+      ['year', 'Год', String(new Date().getFullYear())],
+    ].forEach(function (f) {
+      var input = textField(tp[f[0]] || '');
+      input.placeholder = f[2];
+      titleFields[f[0]] = input;
+      panel.appendChild(fieldRow(f[1], input));
+    });
+
+    // Блок «К защите» нужен выпускным работам, в курсовой его нет.
+    var defenceWrap = el('label', {
+      display: 'flex', alignItems: 'center', gap: '6px',
+      fontSize: '13px', cursor: 'pointer',
+    });
+    var defence = document.createElement('input');
+    defence.type = 'checkbox';
+    defence.checked = Boolean(tp.withDefenceBlock);
+    defenceWrap.appendChild(defence);
+    defenceWrap.appendChild(el('span', {}, 'Добавить блок «К защите» (для ВКР и диссертаций)'));
+    panel.appendChild(fieldRow('Допуск к защите', defenceWrap));
+
     // --- источники
     panel.appendChild(el('div', {
       borderTop: '1px solid #444', marginTop: '4px', paddingTop: '8px',
@@ -576,6 +642,17 @@
       settings.wishes = wishes.value.trim();
       var picked = chapRadios.filter(function (r) { return r.checked; })[0];
       settings.chapters = picked && picked.value ? Number(picked.value) : null;
+
+      var tpNew = {};
+      Object.keys(titleFields).forEach(function (k) {
+        var v = titleFields[k].value.trim();
+        if (v) tpNew[k] = v;
+      });
+      tpNew.withDefenceBlock = defence.checked;
+      // Вуз берём из общего поля — дублировать его на титуле незачем.
+      if (settings.university) tpNew.university = settings.university;
+      settings.titlePage = tpNew;
+      saveTitlePage(tpNew);
       closeModal();
       if (onSaved) onSaved();
     };

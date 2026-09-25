@@ -19,7 +19,8 @@
 // Все параметры визуально проверены через рендеринг в PDF перед использованием.
 
 const { Document, Packer, Paragraph, TextRun, Table, TableRow, TableCell,
-        AlignmentType, BorderStyle, WidthType, PageBreak } = require('docx');
+        AlignmentType, BorderStyle, WidthType, PageBreak,
+        Footer, PageNumber } = require('docx');
 
 // ---- Единицы измерения ----
 // docx использует DXA (1/20 пункта) для отступов/полей и полупункты (half-points)
@@ -299,9 +300,9 @@ function makeContentsLine(text, { indented = false } = {}) {
 
 // Собирает страницу СОДЕРЖАНИЕ по структуре работы: ВВЕДЕНИЕ, главы с
 // разделами, ЗАКЛЮЧЕНИЕ.
-function buildContentsPage(sections, chapterTitles, sectionTitles, withBibliography) {
+function buildContentsPage(sections, chapterTitles, sectionTitles, withBibliography, contentsTitle, bibliographyTitle) {
   const blocks = [];
-  blocks.push(...makeH1('СОДЕРЖАНИЕ', { pageBreakBefore: false }));
+  blocks.push(...makeH1(contentsTitle || 'СОДЕРЖАНИЕ', { pageBreakBefore: false }));
   blocks.push(makeContentsLine('ВВЕДЕНИЕ'));
 
   let lastChapterNum = null;
@@ -320,7 +321,91 @@ function buildContentsPage(sections, chapterTitles, sectionTitles, withBibliogra
   }
 
   blocks.push(makeContentsLine('ЗАКЛЮЧЕНИЕ'));
-  if (withBibliography) blocks.push(makeContentsLine('СПИСОК ЛИТЕРАТУРЫ'));
+  if (withBibliography) blocks.push(makeContentsLine(bibliographyTitle || 'СПИСОК ЛИТЕРАТУРЫ'));
+  return blocks;
+}
+
+/**
+ * Строка титульного листа.
+ *
+ * Титул верстается одиночными строками с одинарным интервалом, а
+ * положение блоков задаётся пустыми строками — так же, как это делают
+ * в Word руками.
+ */
+function titleLine(text, opts = {}) {
+  const { align = AlignmentType.CENTER, bold = false, size = BODY_SIZE, caps = false } = opts;
+  return new Paragraph({
+    children: [new TextRun({
+      text: fixDashes(caps ? String(text || '').toUpperCase() : String(text || '')),
+      size, font: FONT, bold,
+    })],
+    spacing: { before: 0, after: 0, line: 240 },
+    indent: { firstLine: 0 },
+    alignment: align,
+  });
+}
+
+/**
+ * Титульный лист.
+ *
+ * Сделан по образцу из методички МФЮА (приложение 2), но все поля
+ * настраиваемые: у каждого вуза свой титул, и зашить один жёстко —
+ * значит сделать сервис пригодным ровно для одного вуза.
+ *
+ * Незаполненные поля оставляют подчёркнутое место, а не выдуманные
+ * данные: имя научного руководителя придумывать нельзя, а вписать его
+ * ручкой — обычное дело.
+ */
+function buildTitlePage(info) {
+  if (!info) return [];
+  const R = AlignmentType.RIGHT;
+  const blocks = [];
+  const empty = () => blocks.push(titleLine(''));
+
+  if (info.university) blocks.push(titleLine(info.university, { bold: true, caps: true }));
+  if (info.department) blocks.push(titleLine(info.department));
+  if (info.faculty) blocks.push(titleLine(info.faculty));
+  if (info.direction) blocks.push(titleLine(`Направление / специальность: ${info.direction}`));
+  if (info.profile) blocks.push(titleLine(`Профиль / специализация: ${info.profile}`));
+
+  // Блок допуска — только у выпускных работ. В курсовой пустая графа
+  // «Заведующий кафедрой» выглядит нелепо.
+  if (info.withDefenceBlock) {
+    empty();
+    blocks.push(titleLine('К ЗАЩИТЕ', { align: R }));
+    blocks.push(titleLine('(РЕКОМЕНДОВАНО / НЕ РЕКОМЕНДОВАНО)', { align: R, size: 20 }));
+    blocks.push(titleLine('Заведующий кафедрой ______________', { align: R }));
+    blocks.push(titleLine('«____» ______________ 20____ г.', { align: R }));
+  }
+
+  for (let i = 0; i < 4; i++) empty();
+
+  blocks.push(titleLine(info.workType || 'КУРСОВАЯ РАБОТА', { bold: true, caps: true, size: H1_SIZE }));
+  empty();
+  blocks.push(titleLine('на тему:'));
+  if (info.topic) {
+    blocks.push(titleLine(`«${String(info.topic).replace(/\.$/, '')}»`, { bold: true }));
+  }
+  if (info.discipline) {
+    empty();
+    blocks.push(titleLine(`по дисциплине: ${info.discipline}`));
+  }
+
+  for (let i = 0; i < 4; i++) empty();
+
+  blocks.push(titleLine(`Выполнил(а): ${info.student || '____________________'}`, { align: R }));
+  if (info.group) blocks.push(titleLine(`Группа: ${info.group}`, { align: R }));
+  if (info.studentId) blocks.push(titleLine(`Индивидуальный номер (ИНС): ${info.studentId}`, { align: R }));
+  empty();
+  blocks.push(titleLine(`Руководитель: ${info.supervisor || '____________________'}`, { align: R }));
+  blocks.push(titleLine('«____» ______________ 20____ г.', { align: R }));
+
+  for (let i = 0; i < 5; i++) empty();
+
+  const year = info.year || new Date().getFullYear();
+  blocks.push(titleLine(`${info.city || 'Москва'} – ${year}`));
+  blocks.push(new Paragraph({ children: [new PageBreak()] }));
+
   return blocks;
 }
 
@@ -337,13 +422,13 @@ function buildContentsPage(sections, chapterTitles, sectionTitles, withBibliogra
  * Абзацного отступа нет — записи выравниваются по левому краю, как в
  * образцах ГОСТа.
  */
-function buildBibliography(entries) {
+function buildBibliography(entries, title) {
   const records = (entries || [])
     .map((e) => String(e || '').trim())
     .filter(Boolean);
   if (!records.length) return [];
 
-  const blocks = makeH1('СПИСОК ЛИТЕРАТУРЫ', { pageBreakBefore: true });
+  const blocks = makeH1(title || 'СПИСОК ЛИТЕРАТУРЫ', { pageBreakBefore: true });
 
   records.forEach((record, i) => {
     // Запись может прийти уже пронумерованной: «1. 1. Иванов…» —
@@ -365,7 +450,21 @@ function buildBibliography(entries) {
 // ---- Документ целиком ----
 
 // Поля страницы по ГОСТ: верх 2см, низ 2см, слева 3см (переплёт), справа 1.5см.
-function buildDocument(children) {
+function buildDocument(children, opts = {}) {
+  const { titlePage = false, marginRight = 1.5 * CM } = opts;
+
+  // Номер страницы — полем PAGE, а не текстом: Word пересчитает его
+  // сам, когда студент добавит абзац. Правый нижний угол без точки —
+  // так требуют методички. На титуле номер не ставится, но страница
+  // считается первой, поэтому содержание получает номер 2.
+  const footer = new Footer({
+    children: [new Paragraph({
+      alignment: AlignmentType.RIGHT,
+      spacing: { before: 0, after: 0 },
+      children: [new TextRun({ children: [PageNumber.CURRENT], size: BODY_SIZE, font: FONT })],
+    })],
+  });
+
   return new Document({
     styles: {
       default: { document: { run: { font: FONT, size: BODY_SIZE } } },
@@ -378,10 +477,13 @@ function buildDocument(children) {
             top: 2 * CM,
             bottom: 2 * CM,
             left: 3 * CM,
-            right: 1.5 * CM,
+            right: marginRight,
           },
-        }
+        },
+        titlePage,
       },
+      footers: titlePage ? { default: footer, first: new Footer({ children: [] }) }
+                         : { default: footer },
       children,
     }]
   });
@@ -457,12 +559,17 @@ async function generateFragmentDocx({
  * извлечённые из текста плана на фронтенде. Если названия нет — используется
  * запасной вариант "ГЛАВА N" / просто номер раздела.
  */
-async function generateFullDocx({ topic, introduction, sections, conclusion, chapterTitles, sectionTitles, bibliography }) {
+async function generateFullDocx({ topic, introduction, sections, conclusion, chapterTitles, sectionTitles, bibliography, titlePage, contentsTitle, bibliographyTitle, marginRight }) {
   const children = [];
   const refs = (bibliography || []).filter((x) => String(x || '').trim());
+  const contentsName = contentsTitle || 'СОДЕРЖАНИЕ';
+  const refsName = bibliographyTitle || 'СПИСОК ЛИТЕРАТУРЫ';
+
+  // Титул идёт до содержания и не нумеруется
+  children.push(...buildTitlePage(titlePage));
 
   // СОДЕРЖАНИЕ — первая страница документа
-  children.push(...buildContentsPage(sections, chapterTitles, sectionTitles, refs.length > 0));
+  children.push(...buildContentsPage(sections, chapterTitles, sectionTitles, refs.length > 0, contentsName, refsName));
 
   // ВВЕДЕНИЕ — H1 с разрывом страницы после СОДЕРЖАНИЯ
   children.push(...makeH1('ВВЕДЕНИЕ', { pageBreakBefore: true }));
@@ -488,9 +595,12 @@ async function generateFullDocx({ topic, introduction, sections, conclusion, cha
   children.push(...makeH1('ЗАКЛЮЧЕНИЕ', { pageBreakBefore: true }));
   children.push(...makeBodyParagraphs(stripDuplicateHeading(conclusion, 'Заключение')));
 
-  children.push(...buildBibliography(refs));
+  children.push(...buildBibliography(refs, refsName));
 
-  const doc = buildDocument(children);
+  const doc = buildDocument(children, {
+    titlePage: Boolean(titlePage),
+    marginRight: marginRight || 1.5 * CM,
+  });
   return Packer.toBuffer(doc);
 }
 
@@ -498,6 +608,7 @@ module.exports = {
   generateFragmentDocx,
   generateFullDocx,
   buildBibliography,
+  buildTitlePage,
   splitParagraphs,
   parseMarkdownTable,
   fixDashes,
