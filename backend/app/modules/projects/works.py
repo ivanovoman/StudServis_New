@@ -58,7 +58,17 @@ class Work(Base):
     __tablename__ = "works"
 
     id: Mapped[str] = mapped_column(String(32), primary_key=True, default=new_id)
+
+    # Владельцев два, и это временно. owner_key — случайная строка из
+    # браузера, так работы разделялись до появления входа по паролю.
+    # user_id появляется, когда человек вошёл; при первом входе прежние
+    # работы присваиваются учётной записи (claim_works в auth/service).
+    # Убрать owner_key сразу нельзя — вместе с ним пропали бы черновики
+    # тех, кто ещё не регистрировался.
     owner_key: Mapped[str] = mapped_column(String(OWNER_KEY_MAX), nullable=False)
+    user_id: Mapped[str | None] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), nullable=True, index=True
+    )
 
     topic: Mapped[str] = mapped_column(String(500), default="")
     plan: Mapped[str] = mapped_column(Text, default="")
@@ -131,10 +141,12 @@ async def create_work(
     topic: str = "",
     plan: str = "",
     settings_json: str = "{}",
+    user_id: str | None = None,
 ) -> Work:
     work = Work(
         id=new_id(),
         owner_key=owner_key,
+        user_id=user_id,
         topic=(topic or "").strip()[:500],
         plan=plan or "",
         settings_json=settings_json or "{}",
@@ -146,8 +158,24 @@ async def create_work(
     return work
 
 
+def owner_filter(owner_key: str, user_id: str | None):
+    """Условие «работа принадлежит этому человеку».
+
+    Вошедший пользователь опознаётся по user_id — тогда работа видна с
+    любого устройства. Не вошедший по-прежнему опознаётся ключом
+    браузера, иначе он потеряет доступ к своим черновикам.
+
+    Правило одно на все запросы: так чужую работу нельзя достать,
+    случайно забыв проверку в каком-нибудь одном месте.
+    """
+    if user_id:
+        return Work.user_id == user_id
+    return (Work.owner_key == owner_key) & Work.user_id.is_(None)
+
+
 async def get_work(
-    session: AsyncSession, work_id: str, owner_key: str
+    session: AsyncSession, work_id: str, owner_key: str,
+    user_id: str | None = None,
 ) -> Work | None:
     """Работа по id — только своя.
 
@@ -155,13 +183,15 @@ async def get_work(
     работу нельзя достать даже случайно, забыв сравнить ключ.
     """
     res = await session.execute(
-        select(Work).where(Work.id == work_id, Work.owner_key == owner_key)
+        select(Work).where(Work.id == work_id,
+                           owner_filter(owner_key, user_id))
     )
     return res.scalar_one_or_none()
 
 
 async def list_works(
-    session: AsyncSession, owner_key: str, limit: int = 100
+    session: AsyncSession, owner_key: str, limit: int = 100,
+    user_id: str | None = None,
 ) -> list[dict]:
     """Список работ без текстов — для экрана «Мои работы».
 
@@ -189,7 +219,7 @@ async def list_works(
             func.coalesce(totals.c.chars, 0),
         )
         .outerjoin(totals, totals.c.wid == Work.id)
-        .where(Work.owner_key == owner_key)
+        .where(owner_filter(owner_key, user_id))
         .order_by(Work.updated_at.desc())
         .limit(limit)
     )

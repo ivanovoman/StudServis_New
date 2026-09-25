@@ -85,6 +85,7 @@ async def init_models() -> None:
     """
     # Импорт внутри функции, иначе получается кольцо:
     # db -> works -> db.
+    from app.modules.auth import models as auth_models  # noqa: F401
     from app.modules.projects import works  # noqa: F401
 
     engine = get_engine()

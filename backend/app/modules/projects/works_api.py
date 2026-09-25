@@ -14,9 +14,20 @@ from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db import get_session
+from app.modules.auth.api import optional_user
 from app.modules.projects import works as store
 
 router = APIRouter(prefix="/works", tags=["works"])
+
+
+async def owner_user_id(user=Depends(optional_user)) -> str | None:
+    """Идентификатор вошедшего пользователя, если он вошёл.
+
+    Вход необязателен: бесплатные функции работают и без учётной
+    записи. Но если человек вошёл, его работы видны с любого
+    устройства, а не только из того браузера, где их собрали.
+    """
+    return user.id if user else None
 
 
 async def owner_key(x_owner_key: str = Header(default="")) -> str:
@@ -63,8 +74,9 @@ ALLOWED_KINDS = {"introduction", "section", "conclusion"}
 ALLOWED_STATUS = {"draft", "assembling", "done"}
 
 
-async def _load(session: AsyncSession, work_id: str, key: str):
-    work = await store.get_work(session, work_id, key)
+async def _load(session: AsyncSession, work_id: str, key: str,
+                user_id: str | None = None):
+    work = await store.get_work(session, work_id, key, user_id=user_id)
     if work is None:
         # Одна и та же формулировка для «нет такой» и «чужая»: иначе по
         # разнице ответов можно перебором узнать, какие id существуют.
@@ -76,11 +88,13 @@ async def _load(session: AsyncSession, work_id: str, key: str):
 async def create_work(
     body: WorkCreate,
     key: str = Depends(owner_key),
+    user_id: str | None = Depends(owner_user_id),
     session: AsyncSession = Depends(get_session),
 ):
     work = await store.create_work(
         session,
         owner_key=key,
+        user_id=user_id,
         topic=body.topic,
         plan=body.plan,
         settings_json=json.dumps(body.settings, ensure_ascii=False),
@@ -92,9 +106,10 @@ async def create_work(
 async def list_works(
     limit: int = Query(default=100, ge=1, le=500),
     key: str = Depends(owner_key),
+    user_id: str | None = Depends(owner_user_id),
     session: AsyncSession = Depends(get_session),
 ):
-    items = await store.list_works(session, key, limit=limit)
+    items = await store.list_works(session, key, user_id=user_id, limit=limit)
     return {"count": len(items), "works": items}
 
 
@@ -102,9 +117,10 @@ async def list_works(
 async def get_work(
     work_id: str,
     key: str = Depends(owner_key),
+    user_id: str | None = Depends(owner_user_id),
     session: AsyncSession = Depends(get_session),
 ):
-    work = await _load(session, work_id, key)
+    work = await _load(session, work_id, key, user_id)
     return store.work_to_dict(work)
 
 
@@ -113,6 +129,7 @@ async def patch_work(
     work_id: str,
     body: WorkPatch,
     key: str = Depends(owner_key),
+    user_id: str | None = Depends(owner_user_id),
     session: AsyncSession = Depends(get_session),
 ):
     if body.status is not None and body.status not in ALLOWED_STATUS:
@@ -120,7 +137,7 @@ async def patch_work(
             status_code=400,
             detail=f"status должен быть одним из: {', '.join(sorted(ALLOWED_STATUS))}",
         )
-    work = await _load(session, work_id, key)
+    work = await _load(session, work_id, key, user_id)
     await store.update_work(
         session,
         work,
@@ -141,6 +158,7 @@ async def add_piece(
     work_id: str,
     body: PieceIn,
     key: str = Depends(owner_key),
+    user_id: str | None = Depends(owner_user_id),
     session: AsyncSession = Depends(get_session),
 ):
     if body.kind not in ALLOWED_KINDS:
@@ -148,7 +166,7 @@ async def add_piece(
             status_code=400,
             detail=f"kind должен быть одним из: {', '.join(sorted(ALLOWED_KINDS))}",
         )
-    work = await _load(session, work_id, key)
+    work = await _load(session, work_id, key, user_id)
     piece = await store.add_piece(
         session,
         work,
@@ -170,8 +188,9 @@ async def add_piece(
 async def delete_work(
     work_id: str,
     key: str = Depends(owner_key),
+    user_id: str | None = Depends(owner_user_id),
     session: AsyncSession = Depends(get_session),
 ):
-    work = await _load(session, work_id, key)
+    work = await _load(session, work_id, key, user_id)
     await store.delete_work(session, work)
     return {"deleted": work_id}
