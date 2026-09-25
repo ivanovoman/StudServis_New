@@ -146,6 +146,13 @@ def parse_work(raw: dict) -> Source:
         is_oa=_is_open(raw),
         cited_by=int(raw.get("is-referenced-by-count") or 0),
         provider="crossref",
+        # Выходные данные: без них библиографическая запись по ГОСТ
+        # неполна, а именно за ними мы сюда и пришли.
+        pages=str(raw.get("page") or "").strip(),
+        volume=str(raw.get("volume") or "").strip(),
+        issue=str(raw.get("issue") or "").strip(),
+        issn=(raw.get("ISSN") or [""])[0].strip(),
+        publisher=re.sub(r"\s+", " ", str(raw.get("publisher") or "")).strip(),
     )
 
 
@@ -161,7 +168,8 @@ def build_query_url(query: str, *, since_year: int | None = None,
         "filter": ",".join(filters),
         "mailto": CONTACT_EMAIL,
         "select": ("title,author,issued,container-title,DOI,URL,abstract,"
-                   "is-referenced-by-count,license,type"),
+                   "is-referenced-by-count,license,type,page,volume,issue,"
+                   "ISSN,publisher"),
     }
     return f"{API_URL}?{urllib.parse.urlencode(params)}"
 
@@ -214,3 +222,55 @@ def find_sources(query: str, directions: list[str] | None = None, *,
         if len(collected) >= limit * 2:
             break
     return collected
+
+
+def enrich_by_doi(sources: list[Source], *, limit: int = 8,
+                  fetcher=None) -> list[Source]:
+    """Добирает выходные данные для записей, у которых есть DOI.
+
+    КиберЛенинка не отдаёт ни тома, ни страниц — а без них запись по
+    ГОСТ неполна, и нормоконтроль её вернёт. Зато DOI часто напечатан в
+    шапке статьи, а по DOI Crossref отдаёт полные реквизиты.
+
+    Запрос одной работы по DOI у Crossref бесплатен и быстр — это не
+    поиск, а точечное обращение. Правим объекты на месте: дальше их
+    ранжирование и порядок уже устоялись.
+    """
+    call = fetcher or _fetch
+    touched = 0
+
+    for source in sources:
+        if touched >= limit:
+            break
+        if not source.doi or source.pages:
+            continue
+
+        url = (f"https://api.crossref.org/works/"
+               f"{urllib.parse.quote(source.doi, safe='')}"
+               f"?mailto={urllib.parse.quote(CONTACT_EMAIL)}")
+        try:
+            data = call(url, DEFAULT_TIMEOUT)
+        except Exception as err:
+            log.info("Crossref не знает DOI %s: %s", source.doi,
+                     type(err).__name__)
+            continue
+
+        raw = data.get("message") or {}
+        if not raw:
+            continue
+
+        full = parse_work(raw)
+        touched += 1
+
+        # Заголовок и аннотацию не трогаем: у КиберЛенинки они на
+        # русском и полнее, а Crossref нередко хранит английский
+        # перевод заглавия. Берём только то, чего у нас нет.
+        source.pages = source.pages or full.pages
+        source.volume = source.volume or full.volume
+        source.issue = source.issue or full.issue
+        source.issn = source.issn or full.issn
+        source.publisher = source.publisher or full.publisher
+        source.venue = source.venue or full.venue
+        source.year = source.year or full.year
+
+    return sources

@@ -99,6 +99,13 @@ class Source:
     provider: str = "openalex"
     #: Полный текст статьи, если база его отдаёт (КиберЛенинка).
     fulltext: str = ""
+    #: Выходные данные для библиографического описания по ГОСТ. Без них
+    #: запись неполна: вуз требует том, номер и страницы.
+    pages: str = ""
+    volume: str = ""
+    issue: str = ""
+    issn: str = ""
+    publisher: str = ""
 
     @property
     def has_usable_abstract(self) -> bool:
@@ -164,6 +171,38 @@ def normalize_title(title: str) -> str:
     return re.sub(r"\W+", " ", (title or "").lower()).strip()
 
 
+#: Агрегаторы, которые OpenAlex записывает в качестве «журнала». Для
+#: библиографической записи это мусор: «КиберЛенинка» — не издание, в
+#: котором вышла статья, а сайт, где она выложена.
+_NOT_A_JOURNAL = ("cyberlenin", "киберленин", "elibrary", "researchgate",
+                  "semantic scholar", "ssrn", "zenodo", "figshare")
+
+
+def surname_first(name: str) -> str:
+    """Переставляет имя в порядок «фамилия, потом имя».
+
+    Базы отдают латинские имена в европейском порядке («Natalia Yu.
+    Erpyleva»), а русские — в нашем («Ерпылева Наталия Ю.»). Для
+    библиографической записи нужен один порядок, иначе в списке
+    литературы появляется «Erpyleva, N. Y. U.» — фамилией становится
+    имя, а отчество распадается на две буквы.
+
+    Признак латинского имени — отсутствие кириллицы. Тогда фамилией
+    считается последнее слово, кроме случая, когда оно инициал.
+    """
+    clean = " ".join((name or "").split())
+    if not clean or re.search(r"[а-яёА-ЯЁ]", clean):
+        return clean
+
+    parts = clean.replace(",", " ").split()
+    if len(parts) < 2:
+        return clean
+    # «Smith, J.» база уже отдала в нужном порядке — не трогаем.
+    if parts[-1].endswith(".") or len(parts[-1]) == 1:
+        return clean
+    return " ".join([parts[-1]] + parts[:-1])
+
+
 def parse_work(raw: dict[str, Any]) -> Source:
     oa = raw.get("open_access") or {}
     authorships = raw.get("authorships") or []
@@ -175,6 +214,10 @@ def parse_work(raw: dict[str, Any]) -> Source:
     loc = raw.get("primary_location") or {}
     if isinstance(loc.get("source"), dict):
         venue = loc["source"].get("display_name") or ""
+    # Агрегатор вместо журнала сделает библиографическую запись
+    # неверной: «// CyberLeninka» научрук не примет.
+    if any(mark in venue.lower() for mark in _NOT_A_JOURNAL):
+        venue = ""
 
     doi = (raw.get("doi") or "").replace("https://doi.org/", "")
     url = oa.get("oa_url") or raw.get("doi") or raw.get("id") or ""
@@ -185,7 +228,7 @@ def parse_work(raw: dict[str, Any]) -> Source:
         doi=doi,
         abstract=restore_abstract(raw.get("abstract_inverted_index")),
         url=url,
-        authors=[a for a in authors if a],
+        authors=[surname_first(a) for a in authors if a],
         venue=venue,
         cited_by=raw.get("cited_by_count") or 0,
         is_oa=bool(oa.get("is_oa")),

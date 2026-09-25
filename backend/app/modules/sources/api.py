@@ -18,6 +18,7 @@ from __future__ import annotations
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
+from app.modules.sources.gost_biblio import format_list, format_source
 from app.modules.sources.grounding import format_sources_for_prompt
 from app.modules.sources.legal_refs import check_text
 from app.modules.sources.registry import find_sources
@@ -72,6 +73,10 @@ async def search_sources(payload: SearchIn) -> dict:
     return {
         "count": len(sources),
         "prompt_block": format_sources_for_prompt(sources) if sources else "",
+        # Готовый список литературы по ГОСТ Р 7.0.100-2018. Собран из
+        # метаданных баз, а не придуман моделью: реквизиты — то самое
+        # место, где она уверенно врёт.
+        "bibliography": format_list(sources) if sources else "",
         "sources": [
             {
                 "title": s.title,
@@ -84,6 +89,10 @@ async def search_sources(payload: SearchIn) -> dict:
                 "relevance": s.relevance,
                 "provider": s.provider,
                 "has_fulltext": bool(s.fulltext),
+                "pages": s.pages,
+                "volume": s.volume,
+                "issue": s.issue,
+                "gost": format_source(s),
             }
             for s in sources
         ],

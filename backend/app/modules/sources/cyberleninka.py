@@ -16,12 +16,15 @@ from __future__ import annotations
 import asyncio
 import html
 import json
+import logging
 import re
 import urllib.error
 import urllib.request
 from typing import Callable, Iterable
 
 from app.modules.sources.openalex import Source, normalize_title, relevance
+
+log = logging.getLogger(__name__)
 
 SEARCH_URL = "https://cyberleninka.ru/api/search"
 BASE_URL = "https://cyberleninka.ru"
@@ -83,6 +86,29 @@ def _get(url: str) -> str:
         return response.read().decode("utf-8", "replace")
 
 
+#: DOI в шапке статьи: «DOI 10.47643/1815-1329_2024_3_204». Иногда он
+#: приезжает с HTML-мнемониками вместо косой черты.
+_DOI_RE = re.compile(r"\b(10\.\d{4,9}/[^\s<\"']+)", re.I)
+
+
+def extract_doi(raw: dict) -> str:
+    """Выковыривает DOI из распознанного текста статьи."""
+    chunks = raw.get("ocr")
+    if isinstance(chunks, list):
+        text = " ".join(str(c) for c in chunks[:2])
+    else:
+        text = str(chunks or "")
+    if not text:
+        return ""
+
+    text = text.replace("&#x2F;", "/").replace("&#47;", "/")
+    match = _DOI_RE.search(text)
+    if not match:
+        return ""
+    # Хвостовая пунктуация в DOI не входит, а прилипает к нему легко.
+    return match.group(1).rstrip(".,;)»\u00a0").strip()
+
+
 def parse_article(raw: dict) -> Source | None:
     """Собрать Source из записи поисковой выдачи.
 
@@ -117,7 +143,11 @@ def parse_article(raw: dict) -> Source | None:
         abstract=abstract,
         year=year,
         authors=[a for a in authors if a],
-        doi=None,
+        # Отдельного поля с DOI у КиберЛенинки нет, но в распознанном
+        # тексте он часто напечатан прямо в шапке статьи. Оттуда его и
+        # берём: по DOI потом добираются том, номер и страницы, без
+        # которых библиографическая запись по ГОСТ неполна.
+        doi=extract_doi(raw) or None,
         url=BASE_URL + link if link.startswith("/") else link,
         venue=strip_tags(raw.get("journal") or "") or None,
         cited_by=0,
@@ -201,6 +231,54 @@ def search(
     return found
 
 
+#: Выходные данные статьи лежат в мета-тегах её страницы. Форматов два:
+#: Highwire (`citation_*`), который понимают Google Scholar и Zotero, и
+#: eprints — в нём, что важно, есть диапазон страниц.
+_META_RE = re.compile(
+    r'<meta\s+name="([^"]+)"\s+content="([^"]*)"', re.I)
+
+
+def parse_citation_meta(page_html: str) -> dict[str, str]:
+    """Достаёт выходные данные статьи из мета-тегов её страницы.
+
+    Ради этого стоит открыть страницу: ни поиск КиберЛенинки, ни её
+    OAI-PMH не отдают ни страниц, ни номера выпуска, а без них
+    библиографическая запись по ГОСТ неполна и нормоконтроль её вернёт.
+    """
+    found = {name.lower(): (value or "").strip()
+             for name, value in _META_RE.findall(page_html or "")}
+
+    def pick(*names: str) -> str:
+        for name in names:
+            value = found.get(name)
+            if value:
+                return html.unescape(value)
+        return ""
+
+    return {
+        "pages": pick("eprints.pagerange", "citation_firstpage"),
+        "issue": pick("citation_issue", "eprints.number"),
+        "volume": pick("citation_volume", "eprints.volume"),
+        "issn": pick("citation_issn", "eprints.issn"),
+        "publisher": pick("citation_publisher", "eprints.publisher"),
+        "venue": pick("citation_journal_title", "eprints.publication"),
+        "doi": pick("citation_doi", "eprints.doi"),
+    }
+
+
+def apply_citation_meta(source: Source, page_html: str) -> Source:
+    """Заполняет пустые выходные данные источника. Заполненное не трогает."""
+    meta = parse_citation_meta(page_html)
+    source.pages = source.pages or meta["pages"]
+    source.issue = source.issue or meta["issue"]
+    source.volume = source.volume or meta["volume"]
+    source.issn = source.issn or meta["issn"]
+    source.publisher = source.publisher or meta["publisher"]
+    source.venue = source.venue or meta["venue"]
+    source.doi = source.doi or meta["doi"] or None
+    return source
+
+
 def fetch_fulltext(
     source: Source,
     *,
@@ -215,6 +293,10 @@ def fetch_fulltext(
     except (urllib.error.URLError, urllib.error.HTTPError, TimeoutError,
             OSError):
         return ""
+    # Раз уж страница скачана, забираем с неё и выходные данные:
+    # второй запрос за тем же самым был бы расточительством.
+    apply_citation_meta(source, page)
+
     text = extract_fulltext(page)
     return text if len(text) >= MIN_FULLTEXT_CHARS else ""
 
@@ -243,6 +325,42 @@ async def enrich_with_fulltext(
         text = await asyncio.to_thread(fetch_fulltext, source, fetcher=fetcher)
         if text:
             source.fulltext = text
+
+    await asyncio.gather(*(load(s) for s in targets))
+    return items
+
+
+async def enrich_bibliography(
+    sources: Iterable[Source],
+    *,
+    limit: int = 8,
+    fetcher: Callable[[str], str] | None = None,
+) -> list[Source]:
+    """Догрузить выходные данные (страницы, номер, ISSN) для списка.
+
+    Полные тексты грузятся только для верхушки — их некуда девать в
+    промпте. А библиографическое описание нужно каждому источнику,
+    который попадёт в список литературы, поэтому проход отдельный.
+    Страницы загружаются параллельно.
+    """
+    items = list(sources)
+    targets = [
+        s for s in items
+        if s.provider == "cyberleninka" and s.url and not s.pages
+    ][:limit]
+    if not targets:
+        return items
+
+    get = fetcher or _get
+
+    async def load(source: Source) -> None:
+        try:
+            page = await asyncio.to_thread(get, source.url)
+        except Exception as err:
+            log.info("КиберЛенинка не отдала страницу %s: %s",
+                     source.url, type(err).__name__)
+            return
+        apply_citation_meta(source, page)
 
     await asyncio.gather(*(load(s) for s in targets))
     return items

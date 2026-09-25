@@ -144,6 +144,8 @@ async def find_sources(
     years_back: int = DEFAULT_YEARS_BACK,
     min_relevance: float = 0.3,
     with_fulltext: bool = True,
+    #: Догружать ли выходные данные для списка литературы по ГОСТ.
+    with_bibliography: bool = True,
     providers: tuple[str, ...] = ("openalex", "cyberleninka",
                                   "crossref", "doaj"),
 ) -> list[Source]:
@@ -196,5 +198,13 @@ async def find_sources(
     if with_fulltext:
         top = await cyberleninka.enrich_with_fulltext(
             top, limit=FULLTEXT_LIMIT)
+
+    # Выходные данные нужны каждому источнику, а не только верхушке:
+    # в список литературы попадут все, и запись без страниц вернёт
+    # нормоконтроль. Для верхушки страница уже скачана вместе с полным
+    # текстом, так что лишних запросов почти не будет.
+    if with_bibliography:
+        top = await cyberleninka.enrich_bibliography(top, limit=len(top))
+        crossref.enrich_by_doi(top, limit=len(top))
 
     return top

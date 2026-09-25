@@ -695,7 +695,8 @@ class TestSearchEndpoint:
 
         r = client.post("/api/v1/sources/search", json={"topic": "тема"})
         assert r.status_code == 200
-        assert r.json() == {"count": 0, "prompt_block": "", "sources": []}
+        assert r.json() == {"count": 0, "prompt_block": "",
+                            "bibliography": "", "sources": []}
 
     def test_base_failure_reported_as_502(self, client, monkeypatch):
         """Отказ внешней базы не должен выглядеть поломкой сервиса."""
