@@ -20,6 +20,7 @@
 
 from __future__ import annotations
 
+import logging
 import os
 from collections.abc import AsyncIterator
 
@@ -32,6 +33,9 @@ from sqlalchemy.ext.asyncio import (
 from sqlalchemy.orm import DeclarativeBase
 
 from app.config import settings
+
+
+log = logging.getLogger(__name__)
 
 
 class Base(DeclarativeBase):
@@ -76,12 +80,46 @@ def get_session_factory() -> async_sessionmaker[AsyncSession]:
     return _session_factory
 
 
+#: Колонки, добавленные к таблицам уже после их первого выпуска.
+#: `create_all` создаёт только недостающие таблицы и ничего не знает о
+#: недостающих колонках: у того, кто пользовался сервисом раньше, база
+#: осталась бы старой, и запросы падали бы с «no such column».
+#:
+#: Это не замена миграциям — на PostgreSQL схему будет вести Alembic.
+#: Это минимум, чтобы уже существующие базы пережили обновление.
+LATE_COLUMNS: tuple[tuple[str, str, str], ...] = (
+    # таблица, колонка, тип
+    ("works", "user_id", "VARCHAR(32)"),
+)
+
+
+def _add_missing_columns(conn) -> None:
+    """Досыпает колонки, которых нет в существующих таблицах."""
+    from sqlalchemy import inspect, text
+
+    inspector = inspect(conn)
+    existing_tables = set(inspector.get_table_names())
+
+    for table, column, column_type in LATE_COLUMNS:
+        if table not in existing_tables:
+            continue  # таблицу create_all только что создал целиком
+        columns = {c["name"] for c in inspector.get_columns(table)}
+        if column in columns:
+            continue
+        # ADD COLUMN понимают и SQLite, и PostgreSQL. Внешний ключ здесь
+        # не навешиваем: SQLite не умеет добавлять его к существующей
+        # таблице, а связность обеспечивает код.
+        conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {column} {column_type}"))
+        log.info("База обновлена: в таблицу %s добавлена колонка %s",
+                 table, column)
+
+
 async def init_models() -> None:
-    """Создать таблицы, которых ещё нет.
+    """Создать таблицы, которых ещё нет, и дополнить существующие.
 
     Для SQLite этого достаточно. На PostgreSQL в проде схему будет вести
-    Alembic, но сейчас миграций нет, и create_all — честный минимум,
-    который не мешает добавить их позже.
+    Alembic, но сейчас миграций нет, и это — честный минимум, который не
+    мешает добавить их позже.
     """
     # Импорт внутри функции, иначе получается кольцо:
     # db -> works -> db.
@@ -91,6 +129,7 @@ async def init_models() -> None:
     engine = get_engine()
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+        await conn.run_sync(_add_missing_columns)
 
 
 async def get_session() -> AsyncIterator[AsyncSession]:

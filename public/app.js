@@ -716,6 +716,8 @@
     });
 
     addWorksButton();
+
+    addAuthButton();
     highlightSettingsButton();
   }
 
@@ -748,6 +750,65 @@
     });
 
     settingsBtn.parentNode.insertBefore(btn, settingsBtn.nextSibling);
+  }
+
+  /**
+   * Кнопка входа.
+   *
+   * Показывает почту, когда человек вошёл, и «Вход» — когда нет. По
+   * той же причине, что и «Мои работы», добавляется из кода: держать
+   * одинаковый пункт в шестнадцати темах вручную — верный способ их
+   * рассинхронизировать.
+   */
+  function addAuthButton() {
+    if (document.querySelector('[data-action="auth"]')) return;
+
+    var settingsBtn = document.querySelector('[data-action="settings"]');
+    if (!settingsBtn || !settingsBtn.parentNode) return;
+
+    var btn = settingsBtn.cloneNode(false);
+    btn.setAttribute('data-action', 'auth');
+    btn.style.cursor = 'pointer';
+
+    function paint(user) {
+      if (user && user.email) {
+        // Длинный адрес разносит вёрстку узких тем.
+        var short = user.email.length > 22
+          ? user.email.slice(0, 20) + '…' : user.email;
+        btn.textContent = '👤 ' + short;
+        btn.title = 'Вошли как ' + user.email + '. Нажмите, чтобы выйти.';
+      } else {
+        btn.textContent = '👤 Вход';
+        btn.title = 'Войти или зарегистрироваться. Без входа сервис '
+                  + 'тоже работает, но работы видны только в этом браузере.';
+      }
+    }
+
+    btn.addEventListener('click', function () {
+      if (!window.StudAuth) {
+        alert('Вход недоступен: не загрузился auth.js');
+        return;
+      }
+      var user = window.StudAuth.user();
+      if (user) {
+        if (confirm('Выйти из учётной записи ' + user.email + '?')) {
+          window.StudAuth.logout();
+        }
+        return;
+      }
+      window.StudAuth.openAuth('login');
+    });
+
+    settingsBtn.parentNode.insertBefore(btn, settingsBtn.nextSibling);
+
+    if (window.StudAuth) {
+      paint(window.StudAuth.user());
+      window.StudAuth.onChange(paint);
+      // Токен мог протухнуть, пока вкладка была закрыта.
+      window.StudAuth.refresh();
+    } else {
+      paint(null);
+    }
   }
 
   // Кнопка настроек тускнеет, когда активный пункт в них не нуждается.

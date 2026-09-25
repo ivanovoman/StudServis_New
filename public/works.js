@@ -66,6 +66,9 @@
     opts = opts || {};
     opts.headers = opts.headers || {};
     opts.headers['X-Owner-Key'] = ownerKey();
+    // Если человек вошёл, работы ищутся по учётной записи, а не по
+    // ключу браузера, — и видны с любого устройства.
+    if (window.StudAuth) Object.assign(opts.headers, window.StudAuth.authHeaders());
     if (opts.body) opts.headers['Content-Type'] = 'application/json';
     return fetch('/api/v1/works' + path, opts).then(function (r) {
       if (!r.ok) {

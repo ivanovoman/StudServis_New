@@ -348,3 +348,51 @@ def test_guest_still_works_without_account(client):
     listing = client.get("/api/v1/works",
                          headers={"X-Owner-Key": "guest-key-1234567"})
     assert listing.json()["works"][0]["topic"] == "Без регистрации"
+
+
+# --- обновление уже существующей базы ---------------------------------
+
+def test_missing_column_is_added_to_old_database(tmp_path):
+    """У тех, кто пользовался сервисом раньше, таблица works создана без
+    user_id. create_all такие колонки не добавляет, и запросы падали бы
+    с «no such column» — проверяем, что база чинится сама.
+    """
+    import sqlite3
+    from app.db import _add_missing_columns
+    from sqlalchemy import create_engine
+
+    db_file = tmp_path / "old.db"
+    raw = sqlite3.connect(db_file)
+    raw.execute("CREATE TABLE works (id VARCHAR(32) PRIMARY KEY, "
+                "owner_key VARCHAR(128))")
+    raw.commit()
+    raw.close()
+
+    engine = create_engine(f"sqlite:///{db_file}")
+    with engine.begin() as conn:
+        _add_missing_columns(conn)
+
+    raw = sqlite3.connect(db_file)
+    columns = {row[1] for row in raw.execute("PRAGMA table_info(works)")}
+    raw.close()
+    assert "user_id" in columns
+
+
+def test_adding_columns_twice_is_safe(tmp_path):
+    """Сервис перезапускают часто — повторный запуск не должен падать."""
+    import sqlite3
+    from app.db import _add_missing_columns
+    from sqlalchemy import create_engine
+
+    db_file = tmp_path / "twice.db"
+    raw = sqlite3.connect(db_file)
+    raw.execute("CREATE TABLE works (id VARCHAR(32) PRIMARY KEY, "
+                "owner_key VARCHAR(128))")
+    raw.commit()
+    raw.close()
+
+    engine = create_engine(f"sqlite:///{db_file}")
+    with engine.begin() as conn:
+        _add_missing_columns(conn)
+    with engine.begin() as conn:
+        _add_missing_columns(conn)   # не должно бросить

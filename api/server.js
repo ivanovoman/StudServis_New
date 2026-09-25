@@ -29,6 +29,9 @@ app.use('/api/v1', async (req, res) => {
   // Ключ владельца обязан дойти до бэкенда: без него хранилище отвечает
   // 400, и «Мои работы» выглядят сломанными, хотя браузер ключ прислал.
   if (req.headers['x-owner-key']) headers['x-owner-key'] = req.headers['x-owner-key'];
+  // Без этого вход не доезжает до бэкенда: прокси пересылает только
+  // явно перечисленные заголовки.
+  if (req.headers.authorization) headers.authorization = req.headers.authorization;
 
   const isJson = req.is('application/json');
   const init = { method: req.method, headers };
