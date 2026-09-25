@@ -976,6 +976,39 @@ app.post('/api/export-docx', async (req, res) => {
 
 // Скачивание всей работы целиком как .docx — тема, введение, все разделы
 // с таблицами, заключение.
+/**
+ * Список литературы по ГОСТ для готовой работы.
+ *
+ * Берётся из метаданных научных баз, а не из текста модели: реквизиты
+ * публикаций — то самое место, где она уверенно врёт. Журнал настоящий,
+ * год правдоподобный, страницы выдуманы, и вскрывается это ровно тогда,
+ * когда научный руководитель решает открыть ссылку.
+ *
+ * Пустой массив — приемлемый исход: работа без списка литературы всё же
+ * лучше, чем несобранный файл. Пользователю об этом говорится отдельно.
+ */
+async function fetchBibliography(topic) {
+  if (!topic) return [];
+  try {
+    const r = await fetch(`${PY_BACKEND}/api/v1/sources/search`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ topic, limit: 10, with_fulltext: false }),
+      signal: AbortSignal.timeout(45000),
+    });
+    if (!r.ok) return [];
+
+    const data = await r.json();
+    return String(data.bibliography || '')
+      .split('\n')
+      .map((s) => s.trim())
+      .filter(Boolean);
+  } catch (e) {
+    console.error('Список литературы собрать не удалось:', e.message);
+    return [];
+  }
+}
+
 app.post('/api/export-docx-full', async (req, res) => {
   try {
     const { topic, introduction, sections, conclusion, chapterTitles, sectionTitles } = req.body;
@@ -983,7 +1016,14 @@ app.post('/api/export-docx-full', async (req, res) => {
       return res.status(400).json({ error: 'Нет темы работы для экспорта' });
     }
 
-    const buffer = await generateFullDocx({ topic, introduction, sections, conclusion, chapterTitles, sectionTitles });
+    // Клиент может прислать свой список — например, отредактированный
+    // руками. Свой всегда важнее подобранного автоматически.
+    const bibliography = Array.isArray(req.body.bibliography)
+      && req.body.bibliography.length
+      ? req.body.bibliography
+      : await fetchBibliography(topic);
+
+    const buffer = await generateFullDocx({ topic, introduction, sections, conclusion, chapterTitles, sectionTitles, bibliography });
     const filename = String(topic).slice(0, 60).replace(/[\\/:*?"<>|]/g, '_');
 
     res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document');

@@ -338,3 +338,69 @@ class TestFullDocx:
         )
         t = texts(load(data))
         assert "ВВЕДЕНИЕ" in t and "ЗАКЛЮЧЕНИЕ" in t
+
+
+# --- список литературы ------------------------------------------------
+#
+# Единственная часть работы, которую проверяют буквально: научный
+# руководитель открывает ссылку и смотрит, существует ли статья.
+# Поэтому записи приходят готовыми из метаданных баз, а движок только
+# верстает — но верстает придирчиво, иначе вернёт нормоконтроль.
+
+def _paragraphs(data: bytes) -> list[str]:
+    from docx import Document as Doc
+    from io import BytesIO
+    return [p.text.strip() for p in Doc(BytesIO(data)).paragraphs
+            if p.text.strip()]
+
+
+def test_bibliography_section_appears():
+    data = generate_full_docx(
+        topic="Тема", introduction="Введение.", sections=[],
+        conclusion="Заключение.",
+        bibliography=["Рябов, С. И. Пробелы и коллизии // Право. – 2024."])
+    texts = _paragraphs(data)
+    assert "СПИСОК ЛИТЕРАТУРЫ" in texts
+    assert any("Рябов" in t for t in texts)
+
+
+def test_bibliography_listed_in_contents():
+    """Раздел есть в документе — значит обязан быть и в содержании."""
+    data = generate_full_docx(
+        topic="Тема", introduction="Введение.", sections=[],
+        conclusion="Заключение.", bibliography=["Иванов, И. И. Работа."])
+    texts = _paragraphs(data)
+    # Первое вхождение — строка содержания, второе — сам заголовок.
+    assert texts.count("СПИСОК ЛИТЕРАТУРЫ") == 2
+
+
+def test_no_bibliography_no_section():
+    """Пустой список не должен оставлять пустой заголовок."""
+    texts = _paragraphs(generate_full_docx(
+        topic="Тема", introduction="Введение.", sections=[],
+        conclusion="Заключение."))
+    assert "СПИСОК ЛИТЕРАТУРЫ" not in texts
+
+
+def test_blank_entries_are_ignored():
+    texts = _paragraphs(generate_full_docx(
+        topic="Тема", introduction="В.", sections=[], conclusion="З.",
+        bibliography=["", "   ", "\n"]))
+    assert "СПИСОК ЛИТЕРАТУРЫ" not in texts
+
+
+def test_entries_are_numbered():
+    texts = _paragraphs(generate_full_docx(
+        topic="Тема", introduction="В.", sections=[], conclusion="З.",
+        bibliography=["Первый источник.", "Второй источник."]))
+    assert "1. Первый источник." in texts
+    assert "2. Второй источник." in texts
+
+
+def test_existing_numbering_is_not_doubled():
+    """«1. 1. Иванов…» — верный признак машинной сборки."""
+    texts = _paragraphs(generate_full_docx(
+        topic="Тема", introduction="В.", sections=[], conclusion="З.",
+        bibliography=["1. Иванов, И. И. Работа.", "2. Петров, П. П. Труд."]))
+    assert "1. Иванов, И. И. Работа." in texts
+    assert not any(t.startswith("1. 1.") for t in texts)

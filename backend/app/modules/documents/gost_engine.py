@@ -322,6 +322,7 @@ def build_contents_page(
     sections: Sequence[Mapping] | None,
     chapter_titles: Mapping[str, str] | None,
     section_titles: Mapping[str, str] | None,
+    with_bibliography: bool = False,
 ) -> None:
     add_h1(doc, "СОДЕРЖАНИЕ", page_break_before=False)
     add_contents_line(doc, "ВВЕДЕНИЕ")
@@ -340,6 +341,8 @@ def build_contents_page(
             )
 
     add_contents_line(doc, "ЗАКЛЮЧЕНИЕ")
+    if with_bibliography:
+        add_contents_line(doc, "СПИСОК ЛИТЕРАТУРЫ")
 
 
 def _new_document() -> Document:
@@ -434,6 +437,38 @@ def generate_fragment_docx(
     return buf.getvalue()
 
 
+def add_bibliography(doc: Document, entries: Sequence[str] | None) -> None:
+    """Раздел «СПИСОК ЛИТЕРАТУРЫ».
+
+    Записи приходят уже готовыми — собранными по ГОСТ Р 7.0.100-2018 из
+    метаданных научных баз. Здесь только вёрстка.
+
+    Нумерация проставляется вручную, а не списком Word. Причина
+    практическая: методички требуют сплошную нумерацию арабскими
+    цифрами с точкой, а автосписок Word при копировании фрагментов в
+    другой документ перенумеровывается сам и ломает ссылки в тексте.
+
+    Абзацного отступа у записей нет: вторая и последующие строки
+    выравниваются по левому краю, как в образцах ГОСТа.
+    """
+    records = [str(e).strip() for e in (entries or []) if str(e).strip()]
+    if not records:
+        return
+
+    add_h1(doc, "СПИСОК ЛИТЕРАТУРЫ", page_break_before=True)
+
+    for number, record in enumerate(records, 1):
+        # Если запись уже пронумерована, своей нумерации не добавляем:
+        # «1. 1. Иванов…» — верный признак машинной сборки.
+        text = re.sub(r"^\s*\d+[.)]\s*", "", record)
+        p = doc.add_paragraph()
+        _zero_spacing(p)
+        p.paragraph_format.first_line_indent = Cm(0)
+        p.paragraph_format.line_spacing = LINE_SPACING
+        p.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
+        _style_run(p.add_run(f"{number}. {fix_dashes(text)}"), BODY_SIZE)
+
+
 def generate_full_docx(
     *,
     topic: str | None = None,
@@ -442,15 +477,21 @@ def generate_full_docx(
     conclusion: str | None = None,
     chapter_titles: Mapping[str, str] | None = None,
     section_titles: Mapping[str, str] | None = None,
+    bibliography: Sequence[str] | None = None,
 ) -> bytes:
-    """DOCX всей работы: СОДЕРЖАНИЕ, ВВЕДЕНИЕ, главы с разделами, ЗАКЛЮЧЕНИЕ.
+    """DOCX всей работы: СОДЕРЖАНИЕ, ВВЕДЕНИЕ, главы, ЗАКЛЮЧЕНИЕ, СПИСОК.
 
     Разделы группируются по главам на основе номера до точки
     (1.1, 1.2 → ГЛАВА 1; 2.1 → ГЛАВА 2).
     """
     doc = _new_document()
 
-    build_contents_page(doc, sections, chapter_titles, section_titles)
+    # Считаем только непустые записи: список из пустых строк оставил бы
+    # в содержании строку «СПИСОК ЛИТЕРАТУРЫ», за которой ничего нет.
+    refs = [str(e).strip() for e in (bibliography or []) if str(e).strip()]
+
+    build_contents_page(doc, sections, chapter_titles, section_titles,
+                        with_bibliography=bool(refs))
 
     add_h1(doc, "ВВЕДЕНИЕ", page_break_before=True)
     add_body_paragraphs(doc, strip_duplicate_heading(introduction, "Введение"))
@@ -467,6 +508,8 @@ def generate_full_docx(
 
     add_h1(doc, "ЗАКЛЮЧЕНИЕ", page_break_before=True)
     add_body_paragraphs(doc, strip_duplicate_heading(conclusion, "Заключение"))
+
+    add_bibliography(doc, refs)
 
     buf = BytesIO()
     doc.save(buf)

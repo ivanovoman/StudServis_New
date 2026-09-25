@@ -299,7 +299,7 @@ function makeContentsLine(text, { indented = false } = {}) {
 
 // Собирает страницу СОДЕРЖАНИЕ по структуре работы: ВВЕДЕНИЕ, главы с
 // разделами, ЗАКЛЮЧЕНИЕ.
-function buildContentsPage(sections, chapterTitles, sectionTitles) {
+function buildContentsPage(sections, chapterTitles, sectionTitles, withBibliography) {
   const blocks = [];
   blocks.push(...makeH1('СОДЕРЖАНИЕ', { pageBreakBefore: false }));
   blocks.push(makeContentsLine('ВВЕДЕНИЕ'));
@@ -320,6 +320,45 @@ function buildContentsPage(sections, chapterTitles, sectionTitles) {
   }
 
   blocks.push(makeContentsLine('ЗАКЛЮЧЕНИЕ'));
+  if (withBibliography) blocks.push(makeContentsLine('СПИСОК ЛИТЕРАТУРЫ'));
+  return blocks;
+}
+
+/**
+ * Раздел «СПИСОК ЛИТЕРАТУРЫ».
+ *
+ * Записи приходят готовыми — собранными по ГОСТ Р 7.0.100-2018 из
+ * метаданных научных баз. Здесь только вёрстка.
+ *
+ * Нумерация проставляется вручную, а не автосписком Word: методички
+ * требуют сплошную нумерацию арабскими цифрами с точкой, а автосписок
+ * при копировании фрагментов в другой документ перенумеровывается сам.
+ *
+ * Абзацного отступа нет — записи выравниваются по левому краю, как в
+ * образцах ГОСТа.
+ */
+function buildBibliography(entries) {
+  const records = (entries || [])
+    .map((e) => String(e || '').trim())
+    .filter(Boolean);
+  if (!records.length) return [];
+
+  const blocks = makeH1('СПИСОК ЛИТЕРАТУРЫ', { pageBreakBefore: true });
+
+  records.forEach((record, i) => {
+    // Запись может прийти уже пронумерованной: «1. 1. Иванов…» —
+    // верный признак машинной сборки.
+    const text = record.replace(/^\s*\d+[.)]\s*/, '');
+    blocks.push(new Paragraph({
+      children: [new TextRun({
+        text: `${i + 1}. ${fixDashes(text)}`, size: BODY_SIZE, font: FONT,
+      })],
+      spacing: { before: 0, after: 0, line: 360 },
+      indent: { firstLine: 0 },
+      alignment: AlignmentType.JUSTIFIED,
+    }));
+  });
+
   return blocks;
 }
 
@@ -418,11 +457,12 @@ async function generateFragmentDocx({
  * извлечённые из текста плана на фронтенде. Если названия нет — используется
  * запасной вариант "ГЛАВА N" / просто номер раздела.
  */
-async function generateFullDocx({ topic, introduction, sections, conclusion, chapterTitles, sectionTitles }) {
+async function generateFullDocx({ topic, introduction, sections, conclusion, chapterTitles, sectionTitles, bibliography }) {
   const children = [];
+  const refs = (bibliography || []).filter((x) => String(x || '').trim());
 
   // СОДЕРЖАНИЕ — первая страница документа
-  children.push(...buildContentsPage(sections, chapterTitles, sectionTitles));
+  children.push(...buildContentsPage(sections, chapterTitles, sectionTitles, refs.length > 0));
 
   // ВВЕДЕНИЕ — H1 с разрывом страницы после СОДЕРЖАНИЯ
   children.push(...makeH1('ВВЕДЕНИЕ', { pageBreakBefore: true }));
@@ -448,6 +488,8 @@ async function generateFullDocx({ topic, introduction, sections, conclusion, cha
   children.push(...makeH1('ЗАКЛЮЧЕНИЕ', { pageBreakBefore: true }));
   children.push(...makeBodyParagraphs(stripDuplicateHeading(conclusion, 'Заключение')));
 
+  children.push(...buildBibliography(refs));
+
   const doc = buildDocument(children);
   return Packer.toBuffer(doc);
 }
@@ -455,6 +497,7 @@ async function generateFullDocx({ topic, introduction, sections, conclusion, cha
 module.exports = {
   generateFragmentDocx,
   generateFullDocx,
+  buildBibliography,
   splitParagraphs,
   parseMarkdownTable,
   fixDashes,

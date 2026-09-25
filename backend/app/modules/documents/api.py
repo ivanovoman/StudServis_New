@@ -7,7 +7,7 @@ from urllib.parse import quote
 
 from fastapi import APIRouter
 from fastapi.responses import Response
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from app.modules.documents.gost_engine import (
     generate_fragment_docx,
@@ -51,6 +51,17 @@ class FullRequest(BaseModel):
     conclusion: str | None = None
     chapter_titles: dict[str, str] | None = None
     section_titles: dict[str, str] | None = None
+    #: Готовые записи по ГОСТ. Принимаем и одной строкой с переводами
+    #: строк — так их отдаёт /sources/search, и так их проще передать
+    #: из браузера, не разбирая на элементы.
+    bibliography: list[str] | str | None = None
+
+    @field_validator("bibliography")
+    @classmethod
+    def _split_lines(cls, value):
+        if isinstance(value, str):
+            return [line for line in value.splitlines() if line.strip()]
+        return value
 
 
 def _docx_response(data: bytes, filename: str) -> Response:
@@ -96,5 +107,6 @@ async def export_full(payload: FullRequest) -> Response:
         conclusion=payload.conclusion,
         chapter_titles=payload.chapter_titles,
         section_titles=payload.section_titles,
+        bibliography=payload.bibliography,
     )
     return _docx_response(data, payload.topic or "Курсовая работа")
