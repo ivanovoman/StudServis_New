@@ -35,6 +35,16 @@
     return h;
   }
 
+  function legalLink(href, text) {
+    var a = document.createElement('a');
+    a.href = href;
+    a.target = '_blank';
+    a.rel = 'noopener';
+    a.textContent = text;
+    a.style.color = '#8fbf8f';
+    return a;
+  }
+
   function close() {
     if (overlay) { overlay.remove(); overlay = null; }
     document.removeEventListener('keydown', onKey);
@@ -71,11 +81,21 @@
     var list = el('div', { display: 'flex', flexDirection: 'column', gap: '8px' });
     panel.appendChild(list);
 
-    panel.appendChild(el('div', {
+    var foot = el('div', {
       fontSize: '11px', opacity: '0.7', borderTop: '1px solid #444',
-      paddingTop: '8px',
-    }, 'Анализ темы и план работы бесплатны и без ограничений. '
-     + 'Платные — сборка работы целиком и выгрузка в Word.'));
+      paddingTop: '8px', lineHeight: '1.5',
+    });
+    foot.appendChild(el('div', {},
+      'Разбор темы и план бесплатны и без ограничений. Платные — сборка '
+      + 'черновика работы целиком и выгрузка в Word.'));
+
+    var docs = el('div', { marginTop: '4px' });
+    docs.appendChild(legalLink('/legal/oferta.html', 'Оферта'));
+    docs.appendChild(document.createTextNode(' · '));
+    docs.appendChild(legalLink('/legal/privacy.html',
+      'Политика конфиденциальности'));
+    foot.appendChild(docs);
+    panel.appendChild(foot);
 
     overlay.appendChild(panel);
     overlay.addEventListener('mousedown', function (e) {

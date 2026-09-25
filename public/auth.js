@@ -131,6 +131,16 @@
     return input;
   }
 
+  function link(href, text) {
+    var a = document.createElement('a');
+    a.href = href;
+    a.target = '_blank';
+    a.rel = 'noopener';
+    a.textContent = text;
+    a.style.color = '#8fbf8f';
+    return a;
+  }
+
   function close() {
     if (overlay) { overlay.remove(); overlay = null; }
     document.removeEventListener('keydown', onKey);
@@ -203,6 +213,21 @@
     panel.appendChild(el('div', { fontSize: '11px', opacity: '0.65' },
       'Без входа сервис тоже работает — просто работы будут видны '
       + 'только в этом браузере.'));
+
+    // Согласие спрашиваем при регистрации, а не прячем в мелкий шрифт:
+    // человек должен понимать, что его тексты уходят на обработку.
+    if (signup) {
+      var legal = el('div', { fontSize: '11px', opacity: '0.7',
+                              lineHeight: '1.5' });
+      legal.appendChild(document.createTextNode('Регистрируясь, вы '
+        + 'принимаете '));
+      legal.appendChild(link('/legal/oferta.html', 'оферту'));
+      legal.appendChild(document.createTextNode(' и '));
+      legal.appendChild(link('/legal/privacy.html',
+        'политику конфиденциальности'));
+      legal.appendChild(document.createTextNode('.'));
+      panel.appendChild(legal);
+    }
 
     overlay.appendChild(panel);
     overlay.addEventListener('mousedown', function (e) {
