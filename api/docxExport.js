@@ -468,9 +468,17 @@ function buildTitlePage(info) {
  * образцах ГОСТа.
  */
 function buildBibliography(entries, title) {
+  // Сортировка по алфавиту, русские источники перед латинскими:
+  // смешанный алфавит в одном списке выглядит неряшливо. Дубликаты
+  // убираем — одна и та же статья дважды выдаёт машинную сборку.
+  const seen = new Set();
   const records = (entries || [])
-    .map((e) => String(e || '').trim())
-    .filter(Boolean);
+    .map((e) => String(e || '').trim().replace(/^\s*\d+[.)]\s*/, ''))
+    .filter((e) => e && !seen.has(e) && seen.add(e))
+    .sort((a, b) => {
+      const cyr = (s) => /^[а-яё]/i.test(s) ? 0 : 1;
+      return cyr(a) - cyr(b) || a.localeCompare(b, 'ru');
+    });
   if (!records.length) return [];
 
   const blocks = makeH1(title || 'СПИСОК ЛИТЕРАТУРЫ', { pageBreakBefore: true });
@@ -481,7 +489,10 @@ function buildBibliography(entries, title) {
     const text = record.replace(/^\s*\d+[.)]\s*/, '');
     blocks.push(new Paragraph({
       children: [new TextRun({
-        text: `${i + 1}. ${fixDashes(text)}`, size: BODY_SIZE, font: FONT,
+        // Без fixDashes: запись уже собрана по ГОСТу, а правило
+        // «между цифрами — дефис» превратило бы «С. 301–304» в
+        // «С. 301-304», чего нормоконтроль не прощает.
+        text: `${i + 1}. ${text}`, size: BODY_SIZE, font: FONT,
       })],
       spacing: { before: 0, after: 0, line: 360 },
       indent: { firstLine: 0 },
@@ -506,7 +517,8 @@ function buildDocument(children, opts = {}) {
       children: [new Paragraph({
         alignment: AlignmentType.JUSTIFIED,
         spacing: { before: 0, after: 0, line: 240 },
-        children: [new TextRun({ text: fixDashes(text || ''), size: FOOTNOTE_SIZE, font: FONT })],
+        // Тоже без fixDashes — по той же причине, что и в списке.
+        children: [new TextRun({ text: text || '', size: FOOTNOTE_SIZE, font: FONT })],
       })],
     };
   });
