@@ -524,6 +524,48 @@ app.post('/api/generate', async (req, res) => {
  * отказ на одном разделе не роняет сборку: раздел помечается и работа
  * идёт дальше, дописать один кусок проще, чем начинать всё заново.
  */
+/**
+ * Списывает оплаченную работу перед сборкой.
+ *
+ * Если бэкенд недоступен, сборку не блокируем: потерять работающий
+ * сервис из-за недоступного модуля оплаты хуже, чем изредка отдать
+ * сборку бесплатно.
+ */
+async function spendWork(authorization) {
+  if (!authorization) {
+    // Не вошёл — платить нечем, но и списывать не с кого. Пускаем:
+    // ограничение по учётной записи появится вместе с обязательным
+    // входом, сейчас вход добровольный.
+    return { allowed: true, reason: 'anonymous' };
+  }
+  try {
+    const r = await fetch(`${PY_BACKEND}/api/v1/payments/spend`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', authorization },
+      signal: AbortSignal.timeout(15000),
+    });
+    if (!r.ok) return { allowed: true, reason: 'backend_error' };
+    return await r.json();
+  } catch (e) {
+    console.error('Проверка оплаты не удалась:', e.message);
+    return { allowed: true, reason: 'backend_down' };
+  }
+}
+
+/** Возвращает списанное, если собрать не удалось ничего. */
+async function refundWork(authorization) {
+  if (!authorization) return;
+  try {
+    await fetch(`${PY_BACKEND}/api/v1/payments/refund-work`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', authorization },
+      signal: AbortSignal.timeout(15000),
+    });
+  } catch (e) {
+    console.error('Возврат списания не удался:', e.message);
+  }
+}
+
 app.post('/api/assemble', async (req, res) => {
   const { plan, settings, ownerKey } = req.body || {};
 
@@ -542,6 +584,20 @@ app.post('/api/assemble', async (req, res) => {
   }
 
   const queue = buildQueue(outline);
+
+  // Право собрать работу проверяем до первого запроса к модели: тратить
+  // лимит и время впустую, чтобы в конце сказать «заплатите», нечестно.
+  //
+  // Пока магазин не подключён, бэкенд разрешает всем — сервис не должен
+  // встать из-за того, что появился модуль оплаты.
+  const access = await spendWork(req.headers.authorization);
+  if (!access.allowed) {
+    return res.status(402).json({
+      error: 'Сборка работы — платная возможность. Анализ темы и план '
+           + 'остаются бесплатными. Откройте «Оплата», чтобы продолжить.',
+      reason: access.reason,
+    });
+  }
 
   res.setHeader('Content-Type', 'text/event-stream');
   res.setHeader('Cache-Control', 'no-cache');
@@ -654,6 +710,12 @@ app.post('/api/assemble', async (req, res) => {
   // Статус проставляем и при обрыве: работа осталась незаконченной, и
   // в списке это должно быть видно.
   await storage.finish(aborted ? 'assembling' : 'done');
+
+  // Ни одной части не написано — значит услуга не оказана. Списание
+  // возвращаем: платить за неудачу человек не должен.
+  if (!done.length && access.reason === 'spent') {
+    await refundWork(req.headers.authorization);
+  }
 
   if (!aborted) {
     send({

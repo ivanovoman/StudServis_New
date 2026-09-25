@@ -17,6 +17,7 @@ from app.modules.ai_engine.api import router as ai_router
 from app.modules.humanizer.api import router as humanizer_router
 from app.modules.projects.api import router as projects_router
 from app.modules.auth.api import router as auth_router
+from app.modules.payments.api import router as payments_router
 from app.modules.projects.works_api import router as works_router
 from app.modules.sources.api import router as sources_router
 
@@ -75,6 +76,7 @@ app.include_router(ai_router, prefix=settings.api_prefix)
 app.include_router(sources_router, prefix=settings.api_prefix)
 app.include_router(works_router, prefix=settings.api_prefix)
 app.include_router(auth_router, prefix=settings.api_prefix)
+app.include_router(payments_router, prefix=settings.api_prefix)
 
 
 @app.exception_handler(Exception)

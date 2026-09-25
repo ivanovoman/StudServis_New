@@ -718,6 +718,7 @@
     addWorksButton();
 
     addAuthButton();
+    addPaymentsButton();
     highlightSettingsButton();
   }
 
@@ -809,6 +810,36 @@
     } else {
       paint(null);
     }
+  }
+
+  /**
+   * Кнопка «Оплата».
+   *
+   * Отдельным пунктом, а не внутри настроек: человек должен видеть,
+   * что платно, не роясь в меню. Пока магазин не подключён, окно об
+   * этом честно говорит.
+   */
+  function addPaymentsButton() {
+    if (document.querySelector('[data-action="payments"]')) return;
+
+    var settingsBtn = document.querySelector('[data-action="settings"]');
+    if (!settingsBtn || !settingsBtn.parentNode) return;
+
+    var btn = settingsBtn.cloneNode(false);
+    btn.setAttribute('data-action', 'payments');
+    btn.textContent = '₽ Оплата';
+    btn.style.cursor = 'pointer';
+    btn.title = 'Тарифы и оплата. Анализ темы и план — бесплатны.';
+
+    btn.addEventListener('click', function () {
+      if (!window.StudPayments) {
+        alert('Оплата недоступна: не загрузился payments.js');
+        return;
+      }
+      window.StudPayments.openPayments();
+    });
+
+    settingsBtn.parentNode.insertBefore(btn, settingsBtn.nextSibling);
   }
 
   // Кнопка настроек тускнеет, когда активный пункт в них не нуждается.
