@@ -90,6 +90,8 @@
       + 'черновика работы целиком и выгрузка в Word.'));
 
     var docs = el('div', { marginTop: '4px' });
+    docs.appendChild(legalLink('/about.html', 'О сервисе'));
+    docs.appendChild(document.createTextNode(' · '));
     docs.appendChild(legalLink('/legal/oferta.html', 'Оферта'));
     docs.appendChild(document.createTextNode(' · '));
     docs.appendChild(legalLink('/legal/privacy.html',

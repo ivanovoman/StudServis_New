@@ -719,6 +719,7 @@
 
     addAuthButton();
     addPaymentsButton();
+    addAboutButton();
     highlightSettingsButton();
   }
 
@@ -853,6 +854,33 @@
         if (data && data.configured) btn.style.display = '';
       })
       .catch(function () { /* нет бэкенда — нет и оплаты */ });
+  }
+
+  /**
+   * Ссылка «О сервисе».
+   *
+   * Нужна двум разным людям. Первый — тот, кто открыл сервис впервые и
+   * не понимает, что это и чем отличается от нейросети в браузере.
+   * Второй — проверяющий из платёжного сервиса: он смотрит, есть ли на
+   * сайте описание услуги, цены и контакты, и без этого не пропускает.
+   */
+  function addAboutButton() {
+    if (document.querySelector('[data-action="about"]')) return;
+
+    var settingsBtn = document.querySelector('[data-action="settings"]');
+    if (!settingsBtn || !settingsBtn.parentNode) return;
+
+    var btn = settingsBtn.cloneNode(false);
+    btn.setAttribute('data-action', 'about');
+    btn.textContent = '? О сервисе';
+    btn.style.cursor = 'pointer';
+    btn.title = 'Что сервис делает, сколько стоит, контакты';
+
+    btn.addEventListener('click', function () {
+      window.open('/about.html', '_blank', 'noopener');
+    });
+
+    settingsBtn.parentNode.insertBefore(btn, settingsBtn.nextSibling);
   }
 
   // Кнопка настроек тускнеет, когда активный пункт в них не нуждается.
