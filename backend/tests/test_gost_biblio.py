@@ -245,3 +245,42 @@ def test_initials_are_not_mistaken_for_surname():
 
 def test_surname_first_in_caps_is_kept():
     assert surname_first("ИВАНОВ Иван Иванович") == "ИВАНОВ Иван Иванович"
+
+
+def test_initials_before_surname_are_reordered():
+    """OpenAlex отдаёт «Г.В. Мирзаханян» — фамилия последняя.
+
+    Живая проверка показала запись «Г.В., М. Этико-правовой взгляд…»:
+    фамилией стали инициалы, а фамилия ужалась до одной буквы.
+    """
+    assert surname_first("Г.В. Мирзаханян") == "Мирзаханян Г.В."
+    assert surname_first("Г. В. Мирзаханян") == "Мирзаханян Г. В."
+
+
+def test_surname_with_initials_after_is_untouched():
+    """«Налётова М. М.» уже в нужном порядке — не переставлять."""
+    assert surname_first("Налётова М. М.") == "Налётова М. М."
+
+
+def test_journal_period_is_not_doubled():
+    """«International law journal.» + точка записи давали «journal..»."""
+    src = Source(
+        title="Этико-правовой взгляд",
+        authors=["Мирзаханян Г.В."],
+        venue="International law journal.",
+        year=2026,
+    )
+    line = format_source(src)
+    assert ".." not in line
+    assert "// International law journal. – 2026" in line
+
+
+def test_abbreviated_journal_keeps_its_period():
+    """У сокращения точка своя — «ун-та.» рубить нельзя."""
+    src = Source(
+        title="Заглавие",
+        authors=["Иванов И. И."],
+        venue="Вестн. Моск. ун-та.",
+        year=2024,
+    )
+    assert "Вестн. Моск. ун-та." in format_source(src)

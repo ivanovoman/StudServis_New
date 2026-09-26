@@ -14,6 +14,11 @@ const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 
+// Сертификат Минцифры: без него проверка падает на TLS и выглядит так,
+// будто ключ негоден. Перезапускаемся с ним, как это делает сервер.
+const { relaunchWithCA } = require('../api/ca.js');
+if (relaunchWithCA(__filename)) return;
+
 // Читаем .env вручную, чтобы не тянуть лишнюю зависимость.
 function loadEnv() {
   const file = path.join(__dirname, '..', '.env');

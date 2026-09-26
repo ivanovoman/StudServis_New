@@ -215,6 +215,15 @@ def surname_first(name: str) -> str:
         middle_is_patronymic = (len(parts) == 3
                                 and bool(patronymic.search(parts[1]))
                                 and not patronymic.search(parts[-1]))
+        # Признак третий: инициалы стоят перед фамилией — «Г.В.
+        # Мирзаханян». OpenAlex отдаёт русских авторов и так, и тогда
+        # фамилией становились сами инициалы: «Г.В., М. Заглавие».
+        initials = re.compile(r"^(?:[А-ЯЁ]\.){1,3}$")
+        head_is_initials = all(initials.match(p) for p in parts[:-1])
+        tail_is_word = len(parts[-1]) > 2 and "." not in parts[-1]
+        if head_is_initials and tail_is_word:
+            return " ".join([parts[-1]] + parts[:-1])
+
         if last_is_caps or middle_is_patronymic:
             return " ".join([parts[-1].title() if parts[-1].isupper()
                              else parts[-1]] + parts[:-1])

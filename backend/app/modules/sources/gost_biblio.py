@@ -137,6 +137,27 @@ def _pages_block(pages: str) -> str:
     return f"С. {clean}"
 
 
+def _trim_period(text: str) -> str:
+    """Снимает точку в конце названия издания.
+
+    Базы отдают журнал то с точкой, то без: «International law journal.».
+    Дальше запись собирается через «. », и в списке литературы
+    появлялось «journal..».
+
+    Точку после сокращения снимать нельзя — там она часть слова, а не
+    конец фразы. Поэтому смотрим на последнее слово: «Вестн. Моск.
+    ун-та.» сокращение видно по дефису и длине.
+    """
+    trimmed = (text or "").rstrip()
+    if not trimmed.endswith("."):
+        return trimmed
+    words = trimmed[:-1].split()
+    last = words[-1] if words else ""
+    if len(last) >= 4 and "." not in last and "-" not in last:
+        return trimmed[:-1].rstrip()
+    return trimmed
+
+
 def format_source(source: Source, *,
                   accessed: date | None = None,
                   with_url: bool | None = None) -> str:
@@ -163,7 +184,7 @@ def format_source(source: Source, *,
 
     tail: list[str] = []
 
-    venue = re.sub(r"\s+", " ", (source.venue or "").strip())
+    venue = _trim_period(re.sub(r"\s+", " ", (source.venue or "").strip()))
     if venue:
         # Две косые черты отделяют статью от издания, в котором она
         # напечатана. Это обязательный знак, а не украшение.
@@ -254,7 +275,7 @@ def format_footnote(source: Source, *, page: str = "") -> str:
     else:
         parts.append(title)
 
-    venue = re.sub(r"\s+", " ", (source.venue or "").strip())
+    venue = _trim_period(re.sub(r"\s+", " ", (source.venue or "").strip()))
     if venue:
         parts[0] = f"{parts[0]} // {venue}"
 
