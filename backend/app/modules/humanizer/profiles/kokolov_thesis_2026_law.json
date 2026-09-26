@@ -1,0 +1,31 @@
+{
+  "sentence_len_mean": 20.68,
+  "sentence_len_median": 17,
+  "sentence_len_stdev": 20.82,
+  "sentence_len_p10": 4.0,
+  "sentence_len_p90": 36.0,
+  "short_sentence_share": 0.227,
+  "long_sentence_share": 0.167,
+  "paragraph_len_mean": 204.25,
+  "paragraph_len_stdev": 50.11,
+  "law_refs_per_1k": 4.67,
+  "case_refs_per_1k": 4.61,
+  "money_per_1k": 0.0,
+  "year_per_1k": 11.8,
+  "percent_per_1k": 1.46,
+  "cliche_per_1k": 1.41,
+  "cliche_found": {
+    "таким образом": 17,
+    "в целом": 4,
+    "следует отметить": 1,
+    "по сути": 1,
+    "безусловно": 1,
+    "очевидно": 1
+  },
+  "avg_word_len": 7.16,
+  "lexical_diversity": 0.237,
+  "list_marker_share": 0.121,
+  "total_words": 17790,
+  "total_sentences": 881,
+  "total_paragraphs": 91
+}

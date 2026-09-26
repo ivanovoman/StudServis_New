@@ -1,0 +1,17 @@
+node_modules/
+.env
+*.log
+.DS_Store
+
+# Сырые материалы заказчика (тексты, код ГОСТ, детектор) — не в репозиторий
+incoming/
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+backend/storage/
+backend/.env
+uploads/

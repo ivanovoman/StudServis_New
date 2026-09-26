@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>СЕРВИС СТУДРАБОТ</title>
+    <script src="themes.js"></script>
+    <style>
+        body { background: #0a0a0a; }
+    </style>
+</head>
+<body>
+    <script>
+        // Вход всегда через случайную ретро-тему: это лицо сервиса и
+        // начало сценария «из прошлого в будущее». Современный
+        // интерфейс - то, куда приходят, а не то, с чего начинают,
+        // поэтому автоматических перенаправлений на него здесь нет.
+        var params = new URLSearchParams(window.location.search);
+
+        // ?theme=Windows_95.html — открыть конкретную тему (для отладки)
+        var requested = params.get("theme");
+        var theme = THEMES.includes(requested)
+            ? requested
+            : THEMES[Math.floor(Math.random() * THEMES.length)];
+
+        // Параметры заставки пробрасываем в тему: ?intro=off выключает,
+        // ?intro=1 показывает принудительно.
+        var intro = params.get("intro");
+        var suffix = intro ? ("?intro=" + encodeURIComponent(intro)) : "";
+
+        window.location.replace("themes/" + theme + suffix);
+    </script>
+    <noscript>
+        <p style="color:#ffb000;font-family:monospace;">
+            Включите JavaScript или откройте тему напрямую из папки
+            <a href="themes/" style="color:#ffcc00;">themes/</a>.
+        </p>
+    </noscript>
+</body>
+</html>
