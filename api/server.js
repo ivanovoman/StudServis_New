@@ -265,6 +265,10 @@ function sourcesBlock(sourcesData) {
     + '- Ссылка обязательна там, где ты излагаешь чужую позицию, '
     + 'приводишь определение или статистику. Своё рассуждение '
     + 'помечать не нужно.\n'
+    + '- В каждом разделе работы должно быть не меньше двух-трёх таких '
+    + 'ссылок. Раздел научной работы без единой ссылки на литературу '
+    + 'выглядит как пересказ по памяти — и научный руководитель '
+    + 'спросит, откуда взяты утверждения.\n'
     + '- Если ссылаешься на конкретное место в статье, указывай '
     + 'страницу: [2, с. 205]. Номер страницы бери только из самого '
     + 'материала, не придумывай.';
@@ -443,6 +447,7 @@ app.post('/api/generate', async (req, res) => {
     // Копим текст целиком: ссылки на статьи проверяются по готовому
     // ответу, в потоке «ст. 4 ТК РФ» может приехать пятью кусками.
     let fullText = '';
+    let finishReason = null;
 
     while (true) {
       const { done, value } = await reader.read();
@@ -465,6 +470,11 @@ app.post('/api/generate', async (req, res) => {
         try {
           const parsed = JSON.parse(data);
           const choice = parsed.choices?.[0];
+          // Причина остановки. Нужна из-за «length»: модель упёрлась в
+          // свой предел длины и оборвала текст на полуслове. Раньше это
+          // поле не читали, и обрезанный ответ приходил молча — с виду
+          // просто короткий текст, а на деле недописанный.
+          if (choice?.finish_reason) finishReason = choice.finish_reason;
           // Часть моделей кладёт текст в reasoning_content, а не в
           // content — забираем оба варианта.
           const delta = choice?.delta?.content
@@ -486,6 +496,19 @@ app.post('/api/generate', async (req, res) => {
       res.write(`data: ${JSON.stringify({
         error: `модель ${usedModel} вернула пустой ответ. `
              + 'Нажмите «Выполнить» ещё раз — запрос уйдёт на другую модель.',
+      })}\n\n`);
+    }
+
+    // Обрыв по пределу длины — не ошибка запроса, текст пришёл. Но
+    // молчать о нём нельзя: пользователь получит оборванную на
+    // полуслове фразу и решит, что так и задумано.
+    if (sentAny && finishReason === 'length') {
+      console.warn(`Ответ оборван пределом длины (${usedModel}), `
+                 + `${fullText.length} знаков`);
+      res.write(`data: ${JSON.stringify({
+        notice: 'Модель упёрлась в предел длины и оборвала текст. '
+              + 'Допишите остаток отдельным запросом или разбейте задачу '
+              + 'на части.',
       })}\n\n`);
     }
 
@@ -566,6 +589,37 @@ async function refundWork(authorization) {
   }
 }
 
+/**
+ * Тема для поиска публикаций, когда её не задали в настройках.
+ *
+ * Раньше сюда шли первые 200 символов плана — а это всегда служебная
+ * шапка вроде «Подробный план курсовой работы, составленный на основе
+ * твоего ядра» плюс кусок введения. По такому запросу базы не находят
+ * ничего, и работа молча собирается без единой ссылки на литературу.
+ *
+ * Заголовки глав — куда более честный запрос: в них лежат ключевые
+ * слова темы и никакой служебной шелухи.
+ */
+function topicFromPlan(plan) {
+  const text = String(plan || '');
+
+  const explicit = text.match(/^\s*тема\s*[:—-]\s*(.+)$/im);
+  if (explicit) return explicit[1].trim().slice(0, 200);
+
+  const chapters = [...text.matchAll(/^\s*#*\s*\**\s*глава\s+\d+\.?\s*(.+)$/gim)]
+    .map((m) => m[1].replace(/[*#]/g, '').trim())
+    .filter(Boolean)
+    .slice(0, 3);
+  if (chapters.length) return chapters.join('. ').slice(0, 200);
+
+  // Совсем ничего не разобрали — берём первую содержательную строку,
+  // пропуская шапку про сам план.
+  const line = text.split('\n')
+    .map((s) => s.replace(/[*#]/g, '').trim())
+    .find((s) => s.length > 15 && !/план/i.test(s));
+  return (line || text).slice(0, 200);
+}
+
 app.post('/api/assemble', async (req, res) => {
   const { plan, settings, ownerKey } = req.body || {};
 
@@ -625,7 +679,8 @@ app.post('/api/assemble', async (req, res) => {
   // Публикации подбираются ОДИН раз на всю работу. Так номера ссылок
   // [1], [3] означают одно и то же в любом разделе — иначе сноска в
   // третьем разделе указывала бы на чужую статью.
-  const sources = await fetchSources((settings && settings.topic) || plan.slice(0, 200));
+  const searchTopic = (settings && settings.topic) || topicFromPlan(plan);
+  const sources = await fetchSources(searchTopic);
   if (sources) {
     send({ sources: sources.sources });
   } else {
@@ -803,7 +858,10 @@ function createWorkStorage(ownerKey, settings, plan) {
       if (!enabled) return;
       try {
         const created = await api('', 'POST', {
-          topic: (settings && settings.topic) || '',
+          // Без темы работа попадает в «Мои работы» безымянной, и
+          // отличить её от соседних невозможно. Разбираем тему из
+          // плана тем же способом, что и для поиска публикаций.
+          topic: (settings && settings.topic) || topicFromPlan(plan),
           plan: String(plan || ''),
           settings: settings || {},
         });
@@ -951,12 +1009,6 @@ async function writePiece(task, ctx, opts = {}) {
   const brief = buildBrief(settings || {});
   if (brief) messages.push({ role: 'system', content: brief });
 
-  // Найденные публикации — тем же блоком, что и на анализе темы.
-  // Без них модель пишет по памяти, и сослаться в тексте ей не на что:
-  // список литературы в конце работы выглядит тогда декорацией.
-  const srcBlock = sourcesBlock(sources);
-  if (srcBlock) messages.push({ role: 'system', content: srcBlock });
-
   // План целиком нужен всегда: из него видно место куска в работе.
   messages.push({
     role: 'system',
@@ -974,6 +1026,14 @@ async function writePiece(task, ctx, opts = {}) {
              + `двигай работу дальше):\n\n${written.slice(0, 8000)}`,
     });
   }
+
+  // Найденные публикации идут последним системным блоком, вплотную к
+  // самому заданию. Раньше блок стоял третьим из пяти, GigaChat
+  // склеивает все system в одно сообщение, и требование ссылаться
+  // тонуло в середине: живая сборка дала 3 ссылки на 11 разделов,
+  // девять разделов остались вообще без опоры на литературу.
+  const srcBlock = sourcesBlock(sources);
+  if (srcBlock) messages.push({ role: 'system', content: srcBlock });
 
   let user;
   if (expand) {
@@ -1114,6 +1174,19 @@ app.post('/api/export-docx-full', async (req, res) => {
       return res.status(400).json({ error: 'Нет темы работы для экспорта' });
     }
 
+    // Разделы ждём объектами {number, text}. Если прислали массив
+    // строк, документ раньше собирался «успешно», но без единого
+    // раздела: заголовки и текст молча терялись. Лучше честная ошибка.
+    const badSections = (Array.isArray(sections) ? sections : [])
+      .filter((s) => !s || typeof s !== 'object' || !('text' in s));
+    if (badSections.length) {
+      return res.status(400).json({
+        error: 'Разделы должны быть объектами вида {number, text}. '
+             + `Получено ${badSections.length} записей другого вида — `
+             + 'документ собрался бы без них.',
+      });
+    }
+
     // Откуда брать список литературы, по убыванию важности:
     //
     // 1. Прислал клиент — например, отредактированный руками.
@@ -1123,7 +1196,25 @@ app.post('/api/export-docx-full', async (req, res) => {
     //    где именно они использованы.
     // 3. Подбор по теме — когда источников сборки нет (старая работа
     //    из хранилища, ручная склейка).
+    // В список идут только те публикации, на которые текст реально
+    // ссылается. Подбор даёт с запасом (6 статей, использовано 4), и
+    // лишние записи в списке — прямой повод для вопроса на защите:
+    // «покажите, где вы это использовали».
+    //
+    // Нумерацию источников при этом не трогаем: маркер [4] считает
+    // позицию в исходном массиве, и выбрасывание третьей статьи
+    // увело бы все сноски на соседние работы.
+    const allText = [introduction, conclusion]
+      .concat((Array.isArray(sections) ? sections : []).map((s) => s && s.text))
+      .filter(Boolean)
+      .join('\n');
+    const usedNumbers = new Set(
+      [...allText.matchAll(/\[(\d+)(?:,\s*с\.\s*\d+)?\]/g)].map((m) => Number(m[1])));
+
     const fromSources = (Array.isArray(sources) ? sources : [])
+      // Ни одной ссылки в тексте — оставляем список целиком: работа
+      // без сносок хотя бы покажет, на чём она могла быть построена.
+      .filter((s, i) => usedNumbers.size === 0 || usedNumbers.has(i + 1))
       .map((s) => s && s.gost)
       .filter(Boolean);
 
@@ -1176,3 +1267,5 @@ if (require.main === module) {
 }
 
 module.exports = app;
+// Для тестов приёмки: разбор темы проверяется отдельно от сервера.
+module.exports.topicFromPlan = topicFromPlan;

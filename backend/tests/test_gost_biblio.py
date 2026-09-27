@@ -284,3 +284,56 @@ def test_abbreviated_journal_keeps_its_period():
         year=2024,
     )
     assert "Вестн. Моск. ун-та." in format_source(src)
+
+
+def test_caps_title_is_normalised():
+    """КиберЛенинка отдаёт заглавия капсом — в списке это крик."""
+    src = Source(
+        title="РАЗДЕЛ ЖИЛЬЯ С ГОСПОДДЕРЖКОЙ: ПРАВОВЫЕ КОЛЛИЗИИ",
+        authors=["Шестопалова В. В."],
+        year=2026,
+    )
+    line = format_source(src)
+    assert "Раздел жилья с господдержкой: правовые коллизии" in line
+
+
+def test_abbreviations_survive_caps_fix():
+    """«ГК РФ» и «ВС РФ» — не крик, а аббревиатуры."""
+    from app.modules.sources.gost_biblio import _fix_caps_title
+    assert _fix_caps_title("КОЛЛИЗИИ НОРМ ГК РФ И СК РФ") == "Коллизии норм ГК РФ и СК РФ"
+
+
+def test_normal_title_untouched():
+    """Обычное заглавие переписывать нельзя."""
+    from app.modules.sources.gost_biblio import _fix_caps_title
+    t = "Коллизии в праве: ГК РФ и практика ВС РФ"
+    assert _fix_caps_title(t) == t
+
+
+def test_colon_keeps_lowercase_in_russian():
+    """«Вещные права: теоретические коллизии» — одно предложение."""
+    from app.modules.sources.gost_biblio import _fix_caps_title
+    got = _fix_caps_title("АКТУАЛЬНЫЕ ВОПРОСЫ ЗАЩИТЫ ВЕЩНЫХ ПРАВ: ТЕОРЕТИЧЕСКИЕ КОЛЛИЗИИ")
+    assert got == "Актуальные вопросы защиты вещных прав: теоретические коллизии"
+
+
+def test_doaj_name_order_fixed_in_bibliography():
+    """Перестановка имени должна работать для всех баз, не только OpenAlex."""
+    src = Source(
+        title="Соотношение общих и специальных норм",
+        authors=["Наталия Владимировна ИЛЬЮТЧЕНКО"],
+        year=2024,
+    )
+    line = format_source(src)
+    assert line.startswith("Ильютченко, Н. В."), line
+
+
+def test_caps_journal_name_is_normalised():
+    """Названия журналов тоже приходят капсом."""
+    src = Source(
+        title="Уголовное право",
+        authors=["Грязнов С. А."],
+        venue="ТЕНДЕНЦИИ РАЗВИТИЯ НАУКИ И ОБРАЗОВАНИЯ",
+        year=2024,
+    )
+    assert "Тенденции развития науки и образования" in format_source(src)

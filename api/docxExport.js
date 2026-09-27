@@ -639,6 +639,19 @@ async function generateFullDocx({ topic, introduction, sections, conclusion, cha
   const contentsName = contentsTitle || 'СОДЕРЖАНИЕ';
   const refsName = bibliographyTitle || 'СПИСОК ЛИТЕРАТУРЫ';
 
+  // Номер раздела приклеивается при вёрстке, поэтому в названии его
+  // быть не должно. Если он там всё-таки есть (клиент прислал
+  // заголовок целиком), выходило «1.1. 1.1. Понятие и признаки» — и в
+  // содержании, и в тексте. Чистим один раз для обоих мест.
+  const cleanTitles = {};
+  for (const num of Object.keys(sectionTitles || {})) {
+    const escaped = String(num).replace(/\./g, '\\.');
+    cleanTitles[num] = String(sectionTitles[num] || '')
+      .replace(new RegExp(`^\\s*${escaped}\\.?\\s*`), '')
+      .trim();
+  }
+  sectionTitles = cleanTitles;
+
   // Титул идёт до содержания и не нумеруется
   children.push(...buildTitlePage(titlePage));
 

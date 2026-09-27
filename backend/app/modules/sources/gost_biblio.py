@@ -45,6 +45,27 @@ from datetime import date
 
 from app.modules.sources.openalex import Source
 
+# Порядок «фамилия, потом имя» правится здесь, а не в модулях баз.
+# Раньше перестановка жила только в openalex.py — и запись из DOAJ
+# «Наталия Владимировна ИЛЬЮТЧЕНКО» попадала в список литературы как
+# «Наталия, В. И.»: фамилией становилось имя. Базы отдают имена в трёх
+# разных порядках, а место, где из них делают библиографию, одно.
+from app.modules.sources.openalex import surname_first
+
+
+def _ru_surname_first(name: str) -> str:
+    """Перестановка только для русских имён.
+
+    Латинские имена каждая база отдаёт по-своему, и разобрать их без
+    ошибок нельзя: в «Smith John» фамилия первая, в «John Smith» —
+    вторая, а выглядят они одинаково. OpenAlex приводит свои записи
+    сам, остальные базы отдают латиницу уже в нужном порядке, поэтому
+    здесь их не трогаем.
+    """
+    if not re.search(r"[а-яёА-ЯЁ]", name or ""):
+        return name
+    return surname_first(name)
+
 #: Тире, которого требует ГОСТ. Дефис вместо него — самая частая
 #: придирка нормоконтроля.
 DASH = "\u2013"
@@ -137,6 +158,64 @@ def _pages_block(pages: str) -> str:
     return f"С. {clean}"
 
 
+# Предлоги, союзы и артикли. Нужны, чтобы отличить служебное слово от
+# аббревиатуры: и то и другое короткое, но «И» между «ГК РФ» и «СК РФ»
+# — союз, а «ВС» — суд.
+_SERVICE_WORDS = {
+    "в", "во", "с", "со", "и", "а", "но", "на", "по", "для", "к", "ко",
+    "о", "об", "от", "из", "за", "до", "у", "при", "над", "под", "или",
+    "как", "не", "же", "ли",
+    "the", "and", "or", "of", "in", "on", "at", "to", "for", "a", "an",
+    "as", "by", "is", "its", "with", "from",
+}
+
+
+def _fix_caps_title(title: str) -> str:
+    """Возвращает заглавие из капса в обычный вид.
+
+    КиберЛенинка и часть журналов отдают названия статей целиком
+    прописными: «РАЗДЕЛ ЖИЛЬЯ С ГОСПОДДЕРЖКОЙ: ПРАВОВЫЕ КОЛЛИЗИИ». В
+    списке литературы такая строка выглядит как крик и ГОСТу не
+    соответствует — заглавие приводится так, как в источнике, но
+    капслок в источнике был оформительским приёмом обложки.
+
+    Аббревиатуры (РФ, ГК, ЕСПЧ) остаются прописными: короткое слово
+    трогаем, только если это предлог или союз — их список конечен и
+    короток, а вот перечислить все аббревиатуры права невозможно.
+    """
+    letters = [c for c in title if c.isalpha()]
+    if not letters:
+        return title
+    upper_share = sum(1 for c in letters if c.isupper()) / len(letters)
+    # Меньше девяти десятых прописных — обычный заголовок, не трогаем.
+    if upper_share < 0.9:
+        return title
+
+    # Латинские заглавия приводим к традиции англоязычной библиографии:
+    # каждое значимое слово с прописной. Иначе имена собственные
+    # («Russian Federation») ушли бы в строчные и получилось бы хуже,
+    # чем было. Русские — по правилу обычного предложения.
+    latin = not re.search(r"[а-яёА-ЯЁ]", title)
+
+    words = []
+    for i, word in enumerate(title.split(" ")):
+        core = word.strip("«»\"'()[].,:;!?-")
+        if len(core) <= 3 and core.lower() not in _SERVICE_WORDS and core.isupper():
+            words.append(word)          # РФ, ГК, СМИ, ООН, ВС
+        elif i == 0:
+            words.append(word.capitalize())
+        elif latin and core.lower() not in _SERVICE_WORDS:
+            words.append(word.capitalize())
+        else:
+            words.append(word.lower())
+    out = " ".join(words)
+    # После точки — новое предложение, значит прописная. После
+    # двоеточия в русском продолжается то же предложение: «Вещные
+    # права: теоретические коллизии», а не «: Теоретические».
+    return re.sub(r"([.!?]\s+)([а-яёa-z])",
+                  lambda m: m.group(1) + m.group(2).upper(), out)
+
+
 def _trim_period(text: str) -> str:
     """Снимает точку в конце названия издания.
 
@@ -168,11 +247,12 @@ def format_source(source: Source, *,
     ссылки; по умолчанию ссылка добавляется, когда у записи нет
     страниц, то есть найти её в бумажном виде читатель не сможет.
     """
-    title = re.sub(r"\s+", " ", (source.title or "").strip()).rstrip(".")
+    title = _fix_caps_title(
+        re.sub(r"\s+", " ", (source.title or "").strip()).rstrip("."))
     if not title:
         return ""
 
-    authors = [a for a in (source.authors or []) if a and a.strip()]
+    authors = [_ru_surname_first(a) for a in (source.authors or []) if a and a.strip()]
 
     # Заголовок записи: фамилия первого автора с инициалами.
     head = format_author(authors[0], inverted=True) if authors else ""
@@ -184,7 +264,8 @@ def format_source(source: Source, *,
 
     tail: list[str] = []
 
-    venue = _trim_period(re.sub(r"\s+", " ", (source.venue or "").strip()))
+    venue = _fix_caps_title(
+        _trim_period(re.sub(r"\s+", " ", (source.venue or "").strip())))
     if venue:
         # Две косые черты отделяют статью от издания, в котором она
         # напечатана. Это обязательный знак, а не украшение.
@@ -259,11 +340,12 @@ def format_footnote(source: Source, *, page: str = "") -> str:
     `page` — страница, на которую ссылается автор работы. Мы её не
     выдумываем: если она неизвестна, ставится диапазон всей статьи.
     """
-    title = re.sub(r"\s+", " ", (source.title or "").strip()).rstrip(".")
+    title = _fix_caps_title(
+        re.sub(r"\s+", " ", (source.title or "").strip()).rstrip("."))
     if not title:
         return ""
 
-    authors = [a for a in (source.authors or []) if a and a.strip()]
+    authors = [_ru_surname_first(a) for a in (source.authors or []) if a and a.strip()]
     parts: list[str] = []
 
     if authors:
@@ -275,7 +357,8 @@ def format_footnote(source: Source, *, page: str = "") -> str:
     else:
         parts.append(title)
 
-    venue = _trim_period(re.sub(r"\s+", " ", (source.venue or "").strip()))
+    venue = _fix_caps_title(
+        _trim_period(re.sub(r"\s+", " ", (source.venue or "").strip())))
     if venue:
         parts[0] = f"{parts[0]} // {venue}"
 

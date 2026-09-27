@@ -499,3 +499,26 @@ def test_title_page_is_not_numbered():
         topic="Т", introduction="В.", sections=[], conclusion="З.",
         title_page=TITLE)))
     assert doc.sections[0].different_first_page_header_footer is True
+
+
+def test_right_margin_can_be_set():
+    """Методичка МФЮА требует правое поле 10 мм — до этого его нельзя
+    было задать: Python-экспорт всегда ставил 15."""
+    import io
+    from docx import Document
+    from app.modules.documents.gost_engine import generate_fragment_docx
+
+    data = generate_fragment_docx(title="Тест", text="Текст.", margin_right_mm=10)
+    section = Document(io.BytesIO(data)).sections[0]
+    assert round(section.right_margin.mm) == 10
+
+
+def test_right_margin_default_unchanged():
+    """Кто не просил — у того ничего не поехало."""
+    import io
+    from docx import Document
+    from app.modules.documents.gost_engine import generate_fragment_docx
+
+    data = generate_fragment_docx(title="Тест", text="Текст.")
+    section = Document(io.BytesIO(data)).sections[0]
+    assert round(section.right_margin.mm) == 15

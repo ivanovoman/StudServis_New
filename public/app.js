@@ -15,25 +15,25 @@
   // пользователь просто вставляет свой текст, и спрашивать про
   // методичку было бы навязчиво.
   var MENU_STEPS = {
-    1: { step: 'analysis', title: 'АНАЛИЗ ПРОБЛЕМЫ', docTitle: 'Анализ проблемы',
+    1: { step: 'analysis', title: 'РАЗБОР ТЕМЫ', docTitle: 'Разбор темы',
          placeholder: 'Тема берётся из настроек. Здесь можно уточнить акцент…',
          needsSettings: true },
     2: { step: 'plan', title: 'ПЛАН РАБОТЫ', docTitle: 'План работы',
          placeholder: 'Вставьте анализ темы (или заполните настройки и нажмите 1)…',
          needsSettings: true },
-    3: { step: 'introduction', title: 'ВВЕДЕНИЕ', docTitle: 'Введение',
+    3: { step: 'introduction', title: 'ЧЕРНОВИК ВВЕДЕНИЯ', docTitle: 'Введение',
          placeholder: 'Вставьте план работы…',
          needsSettings: true },
     // Сборка всей работы: свой обработчик, потому что это не один
     // запрос, а очередь из десятка. Живёт в assemble.js.
-    4: { assemble: true, title: 'СБОРКА КУРСОВОЙ', needsSettings: true },
+    4: { assemble: true, title: 'СБОРКА ЧЕРНОВИКА РАБОТЫ', needsSettings: true },
     // Пункты 5-7 не генерируют текст, а обрабатывают готовый, поэтому
     // идут не через SSE, а обычным запросом к Python-бэкенду. Тема в
     // настройках им не нужна — отсюда tool: true и отсутствие step.
     5: { tool: 'sources', title: 'ПОДБОР ИСТОЧНИКОВ', needsSettings: true },
     6: { tool: 'gost', title: 'ОФОРМЛЕНИЕ ПО ГОСТ' },
     7: { tool: 'detector', title: 'ПРОВЕРКА НА ИИ' },
-    8: { step: 'speech', title: 'РЕЧЬ ПО РАБОТЕ', docTitle: 'Речь для защиты',
+    8: { step: 'speech', title: 'ЧЕРНОВИК РЕЧИ ДЛЯ ЗАЩИТЫ', docTitle: 'Речь для защиты',
          placeholder: 'Вставьте текст готовой работы…',
          needsSettings: true },
   };

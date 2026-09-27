@@ -34,6 +34,9 @@ class SectionIn(BaseModel):
 
 
 class FragmentRequest(BaseModel):
+    # Правое поле: по ГОСТ 7.32 — 10 мм, у большинства вузов 15, МФЮА
+    # просит 10. Без параметра методичка не могла на это повлиять.
+    margin_right_mm: float | None = None
     title: str | None = None
     text: str | None = None
     table_markdown: str | None = None
@@ -45,6 +48,7 @@ class FragmentRequest(BaseModel):
 
 
 class FullRequest(BaseModel):
+    margin_right_mm: float | None = None
     topic: str | None = None
     introduction: str | None = None
     sections: list[SectionIn] = Field(default_factory=list)
@@ -102,6 +106,7 @@ async def export_fragment(payload: FragmentRequest) -> Response:
         table_number=payload.table_number,
         table_title=payload.table_title,
         reference_sentence=payload.reference_sentence,
+        margin_right_mm=payload.margin_right_mm,
     )
     return _docx_response(data, payload.title or "Фрагмент")
 
@@ -119,5 +124,6 @@ async def export_full(payload: FullRequest) -> Response:
         title_page=payload.title_page,
         contents_title=payload.contents_title,
         bibliography_title=payload.bibliography_title,
+        margin_right_mm=payload.margin_right_mm,
     )
     return _docx_response(data, payload.topic or "Курсовая работа")

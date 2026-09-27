@@ -31,7 +31,7 @@ from docx.enum.table import WD_TABLE_ALIGNMENT
 from docx.enum.text import WD_ALIGN_PARAGRAPH, WD_BREAK
 from docx.oxml import OxmlElement
 from docx.oxml.ns import qn
-from docx.shared import Cm, Pt, Twips
+from docx.shared import Cm, Pt, Twips, Mm
 
 # ---- Единицы и константы оформления ----
 # python-docx оперирует Pt/Cm/Twips напрямую, поэтому DXA-константы
@@ -511,8 +511,14 @@ def build_contents_page(
         add_contents_line(doc, bibliography_title)
 
 
-def _new_document() -> Document:
-    """A4 + поля по ГОСТ + Times New Roman 14pt как стиль по умолчанию."""
+def _new_document(margin_right_mm: float | None = None) -> Document:
+    """A4 + поля по ГОСТ + Times New Roman 14pt как стиль по умолчанию.
+
+    Правое поле вынесено в параметр: по ГОСТ 7.32 это 10 мм, но
+    большинство вузов просит 15, а МФЮА в своей методичке — ровно 10.
+    Значение по умолчанию оставляем прежним, чтобы ничего не поехало
+    у тех, кто ничего не просил.
+    """
     doc = Document()
     section = doc.sections[0]
     section.page_width = Cm(21)
@@ -520,7 +526,8 @@ def _new_document() -> Document:
     section.top_margin = PAGE_MARGIN_TOP
     section.bottom_margin = PAGE_MARGIN_BOTTOM
     section.left_margin = PAGE_MARGIN_LEFT
-    section.right_margin = PAGE_MARGIN_RIGHT
+    section.right_margin = (Mm(margin_right_mm) if margin_right_mm
+                            else PAGE_MARGIN_RIGHT)
 
     normal = doc.styles["Normal"]
     normal.font.name = FONT
@@ -568,13 +575,14 @@ def generate_fragment_docx(
     table_number: str | None = None,
     table_title: str | None = None,
     reference_sentence: str | None = None,
+    margin_right_mm: float | None = None,
 ) -> bytes:
     """DOCX одного фрагмента (любой шаг протокола).
 
     Заголовок форматируется как H1, если это стандартный раздел работы
     или явно указан is_h1; иначе как H2 (например, "План раздела 1.1").
     """
-    doc = _new_document()
+    doc = _new_document(margin_right_mm)
     normalized_title = (title or "Документ").strip()
     use_h1 = is_h1 if is_h1 is not None else normalized_title.upper() in H1_TITLES
 
@@ -648,13 +656,14 @@ def generate_full_docx(
     title_page: Mapping | None = None,
     contents_title: str = "СОДЕРЖАНИЕ",
     bibliography_title: str = "СПИСОК ЛИТЕРАТУРЫ",
+    margin_right_mm: float | None = None,
 ) -> bytes:
     """DOCX всей работы: СОДЕРЖАНИЕ, ВВЕДЕНИЕ, главы, ЗАКЛЮЧЕНИЕ, СПИСОК.
 
     Разделы группируются по главам на основе номера до точки
     (1.1, 1.2 → ГЛАВА 1; 2.1 → ГЛАВА 2).
     """
-    doc = _new_document()
+    doc = _new_document(margin_right_mm)
 
     # Считаем только непустые записи: список из пустых строк оставил бы
     # в содержании строку «СПИСОК ЛИТЕРАТУРЫ», за которой ничего нет.

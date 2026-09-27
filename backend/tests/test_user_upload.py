@@ -367,3 +367,18 @@ class TestMeaningfulExcerpt:
         out = format_sources_for_prompt([s])
         assert "Субсидиарная ответственность контролирующих" in out
         assert "МОСКОВСКИЙ УНИВЕРСИТЕТ" not in out
+
+
+def test_report_is_in_russian():
+    """Отчёт читает студент: «kind = diploma» ему ничего не говорит."""
+    from app.modules.projects.methodichka import parse_methodichka
+
+    res = parse_methodichka(
+        "Методические указания по подготовке магистерской диссертации. "
+        "Кафедра гражданско-правовых дисциплин, судебная практика, ГК РФ. "
+        "Основная часть состоит как минимум из двух глав."
+    )
+    report = res.report()
+    assert "Тип работы: диссертация" in report
+    assert "kind" not in report
+    assert "diploma" not in report and "thesis" not in report

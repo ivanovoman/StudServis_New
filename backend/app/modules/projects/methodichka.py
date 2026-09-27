@@ -71,7 +71,7 @@ class MethodichkaResult:
             return "Из методички ничего распознать не удалось."
         lines = ["Распознано из методички (проверьте перед запуском):"]
         for f in self.findings:
-            lines.append(f"  • {f.field} = {f.value}")
+            lines.append(f"  • {human_finding(f.field, f.value)}")
             lines.append(f"      основание: «{f.short_quote()}»")
         if self.unparsed_notes:
             lines.append("")
@@ -96,6 +96,40 @@ RE_PAGES = re.compile(
 RE_PAGES_MIN = re.compile(
     r"(?i)объ[её]м[^.]{0,60}?не\s+менее\s+(\d{2})\s*(?:страниц|стр\.?|с\.)",
 )
+
+# Имена полей и значений человеческим языком. Отчёт читает студент, а
+# не разработчик: строка «kind = diploma» ему ничего не говорит, и
+# проверить такое распознавание он не может.
+FIELD_NAMES = {
+    "kind": "Тип работы",
+    "subject": "Направление",
+    "chapters": "Число глав",
+    "requires_hypothesis": "Гипотеза",
+    "law_proposals": "Предложения по законодательству",
+    "cases": "Судебная практика",
+    "tables": "Таблицы и графики",
+}
+
+VALUE_NAMES = {
+    "coursework": "курсовая работа",
+    "diploma": "дипломная работа (ВКР)",
+    "thesis": "диссертация",
+    "legal": "юридическое",
+    "economics": "экономическое",
+    "required": "требуется",
+    "optional": "по желанию",
+    "forbidden": "не нужно",
+    True: "требуется",
+    False: "не нужна",
+}
+
+
+def human_finding(field: str, value: object) -> str:
+    """Собирает строку отчёта на русском: «Тип работы: диссертация»."""
+    name = FIELD_NAMES.get(field, field)
+    shown = VALUE_NAMES.get(value, value)
+    return f"{name}: {shown}"
+
 
 _WORD_NUM = {
     "двух": 2, "трёх": 3, "трех": 3, "2": 2, "3": 3, "двух-трёх": 3,

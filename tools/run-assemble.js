@@ -1,46 +1,38 @@
 #!/usr/bin/env node
 /**
- * Прогон полной сборки работы через /api/assemble.
+ * Прогон сборки работы (пункт 4) без браузера — для приёмки.
  *
- * Нужен, чтобы мерить сборку целиком, а не по одному разделу: время,
- * объёмы частей, отказы и порчу текста. Через браузер это неудобно —
- * вкладку нельзя закрыть, а результат нигде не сохраняется.
+ * Повторяет то, что делает assemble.js на странице: шлёт план в
+ * POST /api/assemble и разбирает поток событий. Печатает то, что
+ * сценарий приёмки требует проверить: структуру, число частей, объём
+ * каждой, найденные источники, пометки о ссылках на закон.
  *
- *   node tools/run-assemble.js <файл-плана> [файл-результата]
- *
- * Результат кладётся в JSON: части, объёмы, время, список отказов.
+ * Запуск:
+ *   node tools/run-assemble.js --plan-file /tmp/plan.txt --out /tmp/work.json
  */
 
 const fs = require('fs');
+const { relaunchWithCA } = require('../api/ca.js');
+if (relaunchWithCA(__filename)) return;
 
-const planFile = process.argv[2];
-const outFile = process.argv[3] || '/tmp/assembled.json';
-const base = process.env.BASE_URL || 'http://localhost:3000';
-
-if (!planFile || !fs.existsSync(planFile)) {
-  console.error('Укажите файл плана: node tools/run-assemble.js plan.md');
-  process.exit(1);
+function arg(name, def = null) {
+  const i = process.argv.indexOf(`--${name}`);
+  return i > -1 ? process.argv[i + 1] : def;
 }
 
-const plan = fs.readFileSync(planFile, 'utf8');
-const settings = {
-  topic: 'Коллизии в праве',
-  chapters: 2,
-  university: '',
-  methodichka: '',
-  wishes: '',
-  sources: [],
-};
+const BASE = arg('base', 'http://localhost:3000');
+const plan = fs.readFileSync(arg('plan-file'), 'utf8');
+const settings = JSON.parse(arg('settings', '{}'));
+const outFile = arg('out');
 
-// Знаки без пробелов — именно в них заданы нормы объёма.
-const noSpace = (s) => s.replace(/\s/g, '').length;
+const dense = (s) => s.replace(/\s/g, '').length;
 
 (async () => {
-  const t0 = Date.now();
-  const res = await fetch(`${base}/api/assemble`, {
+  const started = Date.now();
+  const res = await fetch(`${BASE}/api/assemble`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ plan, settings }),
+    body: JSON.stringify({ plan, settings, ownerKey: 'acceptance-run' }),
   });
 
   if (!res.ok) {
@@ -50,77 +42,80 @@ const noSpace = (s) => s.replace(/\s/g, '').length;
 
   const reader = res.body.getReader();
   const decoder = new TextDecoder();
-  let buf = '';
+  let buffer = '';
   const pieces = [];
   const failed = [];
-  let outline = [];
+  const legal = [];
+  let sources = [];
   let total = 0;
+  let structureAt = null;
+  let savedSeen = false;
 
-  while (true) {
+  for (;;) {
     const { done, value } = await reader.read();
     if (done) break;
-    buf += decoder.decode(value, { stream: true });
-    const lines = buf.split('\n');
-    buf = lines.pop();
+    buffer += decoder.decode(value, { stream: true });
+    const lines = buffer.split('\n');
+    buffer = lines.pop();
 
     for (const line of lines) {
       if (!line.startsWith('data: ')) continue;
-      const raw = line.slice(6).trim();
-      if (raw === '[DONE]') continue;
+      const payload = line.slice(6).trim();
+      if (payload === '[DONE]') continue;
+      let o;
+      try { o = JSON.parse(payload); } catch (e) { continue; }
 
-      let ev;
-      try { ev = JSON.parse(raw); } catch { continue; }
+      if (o.error) { console.error('ОШИБКА:', o.error); process.exit(1); }
 
-      if (ev.outline) {
-        outline = ev.outline;
-        total = ev.total;
-        console.log(`План разобран: ${total} частей`);
-        if (ev.warnings && ev.warnings.length) {
-          for (const w of ev.warnings) console.log(`  предупреждение: ${w}`);
+      if (o.outline) {
+        structureAt = Date.now() - started;
+        total = o.total;
+        console.log(`  структура за ${(structureAt / 1000).toFixed(1)} с, частей: ${total}`);
+        for (const c of o.outline) {
+          console.log(`    Глава ${c.number}. ${c.title}`);
+          for (const s of c.sections) console.log(`      ${s.number} ${s.title}`);
+        }
+        if (o.warnings && o.warnings.length) {
+          console.log(`    предупреждения: ${o.warnings.join('; ')}`);
         }
       }
-      if (ev.progress) {
-        const p = ev.progress;
-        process.stdout.write(
-          `[${p.index}/${p.total}] ${p.title} ... `
-        );
+      if (o.sources) {
+        sources = o.sources;
+        console.log(`  опора: ${sources.length} публикаций`);
       }
-      if (ev.expanding) {
-        const x = ev.expanding;
-        process.stdout.write(
-          `коротко (${x.have} из ${x.need}), дописываю #${x.attempt} ... `
-        );
+      if (o.notice) console.log(`  ВНИМАНИЕ: ${o.notice}`);
+      if (o.saved && !savedSeen) { savedSeen = true; console.log('  сохранение: включено'); }
+      if (o.piece) {
+        pieces.push(o.piece);
+        const text = o.piece.text || '';
+        console.log(`  [${pieces.length}/${total}] ${o.piece.heading || o.piece.kind}`
+          + ` — ${dense(text)} зн. без пробелов,`
+          + ` ${((Date.now() - started) / 1000).toFixed(0)} с`);
       }
-      if (ev.piece) {
-        const el = ((Date.now() - t0) / 1000).toFixed(0);
-        pieces.push(ev.piece);
-        const fixNote = ev.piece.fixed && ev.piece.fixed.length
-          ? `, исправлено слов: ${ev.piece.fixed.length}`
-          : '';
-        console.log(
-          `готово ${noSpace(ev.piece.text)} зн. б/п (${el} с всего${fixNote})`
-        );
+      if (o.failed) {
+        failed.push(o.failed);
+        console.log(`  ПРОВАЛ: ${o.failed.title} — ${o.failed.error || ''}`);
       }
-      if (ev.failed) {
-        failed.push(ev.failed);
-        console.log(`СБОЙ: ${ev.failed.reason}`);
-      }
-      if (ev.finished) {
-        console.log(
-          `\nИтог: написано ${ev.finished.written}, сбоев ${ev.finished.failed}`
-        );
-      }
+      if (o.legal) legal.push(o.legal);
     }
   }
 
-  const secs = (Date.now() - t0) / 1000;
-  fs.writeFileSync(outFile, JSON.stringify({
-    seconds: secs, outline, pieces, failed,
-  }, null, 1));
+  const secs = ((Date.now() - started) / 1000).toFixed(0);
+  console.log(`\n  итого: ${pieces.length} частей, провалов ${failed.length}, ${secs} с`);
 
-  console.log(`Время: ${Math.floor(secs / 60)} мин ${Math.round(secs % 60)} с`);
-  console.log(`Результат: ${outFile}`);
+  const checked = legal.reduce((a, l) => a + (l.checked || 0), 0);
+  const problems = legal.reduce((a, l) => a + (l.problems || 0), 0);
+  console.log(`  ссылки на закон: проверено ${checked}, расхождений ${problems}`);
+
+  const all = pieces.map((p) => p.text || '').join('\n');
+  const markers = (all.match(/\[\d+(?:,\s*с\.\s*\d+)?\]/g) || []);
+  console.log(`  маркеров сносок в тексте: ${markers.length}`);
+
+  if (outFile) {
+    fs.writeFileSync(outFile, JSON.stringify({ pieces, sources, failed, legal }, null, 2));
+    console.log(`  сохранено: ${outFile}`);
+  }
 })().catch((e) => {
-  console.error('Ошибка:', e.message);
+  console.error('Сорвалось:', e.message, e.cause ? `(${e.cause.code})` : '');
   process.exit(1);
 });

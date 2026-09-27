@@ -103,3 +103,75 @@ test('готовая нумерация не удваивается', async () =
   assert.ok(texts.some((t) => t.startsWith('1. Иванов')));
   assert.ok(!texts.some((t) => t.includes('1. 1.')));
 });
+
+// --- Тема для поиска источников (вскрылось на приёмке) ---
+
+const { topicFromPlan } = require('../api/server.js');
+
+test('тема берётся из заголовков глав, а не из шапки плана', () => {
+  const plan = [
+    'Подробный план курсовой работы, составленный на основе твоего ядра.',
+    '',
+    '**Введение**',
+    'Обоснование актуальности темы.',
+    '',
+    '### Глава 1. Теория правовых коллизий',
+    '**1.1 Понятие и признаки**',
+    '',
+    '### Глава 2. Судебная практика разрешения коллизий',
+  ].join('\n');
+
+  const topic = topicFromPlan(plan);
+  assert.match(topic, /Теория правовых коллизий/);
+  assert.match(topic, /Судебная практика/);
+  assert.doesNotMatch(topic, /составленный на основе/);
+});
+
+test('явно указанная тема важнее заголовков', () => {
+  const plan = 'Тема: Коллизии в семейном праве\n\n### Глава 1. Общие положения';
+  assert.strictEqual(topicFromPlan(plan), 'Коллизии в семейном праве');
+});
+
+test('без глав берётся первая содержательная строка', () => {
+  const plan = 'План работы\n\nПравовое регулирование самовольного строительства в России.';
+  assert.match(topicFromPlan(plan), /самовольного строительства/);
+});
+
+// --- Заголовки разделов в DOCX (вскрылось на приёмке) ---
+
+const { generateFullDocx } = require('../api/docxExport.js');
+
+/** Достаёт видимый текст документа из .docx. */
+async function docxText(buffer) {
+  const zip = await JSZip.loadAsync(buffer);
+  const xml = await zip.file('word/document.xml').async('string');
+  return xml.replace(/<[^>]+>/g, '');
+}
+
+test('номер раздела не задваивается, если он есть в названии', async () => {
+  const buf = await generateFullDocx({
+    topic: 'Тема',
+    introduction: 'Введение.',
+    conclusion: 'Заключение.',
+    sections: [{ number: '1.1', text: 'Текст раздела.' }],
+    // Клиент прислал заголовок вместе с номером — так уже бывало.
+    sectionTitles: { '1.1': '1.1. Понятие и признаки' },
+    chapterTitles: { 1: 'Теория' },
+  });
+  const text = await docxText(buf);
+  assert.ok(text.includes('1.1. Понятие и признаки'), 'заголовок раздела пропал');
+  assert.ok(!/1\.1\.\s*1\.1\./.test(text), 'номер раздела задвоился');
+});
+
+test('чистое название раздела не портится', async () => {
+  const buf = await generateFullDocx({
+    topic: 'Тема',
+    introduction: 'Введение.',
+    conclusion: 'Заключение.',
+    sections: [{ number: '2.3', text: 'Текст.' }],
+    sectionTitles: { '2.3': 'Судебная практика' },
+    chapterTitles: { 2: 'Практика' },
+  });
+  const text = await docxText(buf);
+  assert.ok(text.includes('2.3. Судебная практика'));
+});
