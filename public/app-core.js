@@ -34,8 +34,9 @@
          docTitle: 'Введение', needsSettings: true,
          placeholder: 'Вставьте план работы' },
 
-    4: { step: null, title: 'Собрать курсовую',
-         short: 'Полная сборка работы по готовому плану' },
+    4: { assemble: true, title: 'Собрать курсовую',
+         short: 'Полная сборка работы по готовому плану',
+         needsSettings: true },
 
     5: { tool: 'sources', title: 'Подобрать источники',
          short: 'Публикации из открытого доступа с проверкой ссылок',
@@ -52,6 +53,64 @@
          docTitle: 'Речь для защиты', needsSettings: true,
          placeholder: 'Вставьте текст готовой работы' },
   };
+
+
+  // ------------------------------------------------- настройки работы
+
+  var SETTINGS_KEY = 'studrabots.settings';
+
+  var DEFAULTS = {
+    topic: '',
+    university: '',
+    methodichka: '',
+    wishes: '',
+    // null — «решает модель по теме» (2 или 3 главы). Жёстко
+    // фиксировать тройку нельзя: курсовая бывает и двухглавой, а
+    // методичка вуза может прямо требовать две.
+    chapters: null,
+  };
+
+  var settings = load();
+
+  /**
+   * Настройки переживают перезагрузку страницы.
+   *
+   * Раньше они жили в памяти вкладки и вдобавок у каждого интерфейса
+   * были свои: человек заполнял вуз и пожелания в ретро, переходил в
+   * современный вид — и генерация шла без них, молча и с худшим
+   * результатом. Теперь значение одно на оба интерфейса.
+   */
+  function load() {
+    var out = {};
+    Object.keys(DEFAULTS).forEach(function (k) { out[k] = DEFAULTS[k]; });
+    try {
+      var saved = JSON.parse(localStorage.getItem(SETTINGS_KEY) || '{}');
+      Object.keys(DEFAULTS).forEach(function (k) {
+        if (saved[k] !== undefined && saved[k] !== null) out[k] = saved[k];
+      });
+    } catch (e) {
+      // Битое или недоступное хранилище — работаем на умолчаниях.
+    }
+    return out;
+  }
+
+  function getSettings() {
+    var copy = {};
+    Object.keys(settings).forEach(function (k) { copy[k] = settings[k]; });
+    return copy;
+  }
+
+  function saveSettings(patch) {
+    Object.keys(patch || {}).forEach(function (k) {
+      if (k in DEFAULTS) settings[k] = patch[k];
+    });
+    try {
+      localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
+    } catch (e) {
+      // Приватный режим браузера: настройки проживут хотя бы вкладку.
+    }
+    return getSettings();
+  }
 
   /**
    * Читает SSE-поток генерации.
@@ -123,6 +182,64 @@
   }
 
   /** Собирает .docx на сервере и отдаёт браузеру на скачивание. */
+
+  /**
+   * Читает поток событий SSE и отдаёт их разобранными.
+   *
+   * Тем же механизмом работают генерация шага и сборка работы, поэтому
+   * разбор потока живёт в одном месте: сборка идёт ~3 минуты, и
+   * вторая копия этого кода разошлась бы с первой на первой же правке.
+   *
+   * @param {string} url     адрес обработчика
+   * @param {object} body    тело запроса
+   * @param {function} onEvent  разобранный объект события
+   * @param {function} onDone   завершение; аргумент не пуст при ошибке
+   */
+  function stream(url, body, onEvent, onDone) {
+    fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    }).then(function (res) {
+      if (!res.ok) {
+        return res.json().then(function (j) {
+          throw new Error(j.error || ('HTTP ' + res.status));
+        });
+      }
+
+      var reader = res.body.getReader();
+      var decoder = new TextDecoder();
+      var buffer = '';
+
+      function pump() {
+        return reader.read().then(function (r) {
+          if (r.done) { onDone(null); return; }
+
+          buffer += decoder.decode(r.value, { stream: true });
+          var lines = buffer.split('\n');
+          buffer = lines.pop();
+
+          for (var i = 0; i < lines.length; i++) {
+            var line = lines[i].trim();
+            if (line.indexOf('data:') !== 0) continue;
+            var payload = line.slice(5).trim();
+            if (!payload || payload === '[DONE]') continue;
+            try {
+              onEvent(JSON.parse(payload));
+            } catch (e) {
+              // Битая строка события не повод ронять всю сборку.
+            }
+          }
+          return pump();
+        });
+      }
+
+      return pump();
+    }).catch(function (e) {
+      onDone(e.message || String(e));
+    });
+  }
+
   function exportDocx(title, text) {
     return fetch('/api/export-docx', {
       method: 'POST',
@@ -148,5 +265,8 @@
     STEPS: STEPS,
     generate: generate,
     exportDocx: exportDocx,
+    getSettings: getSettings,
+    saveSettings: saveSettings,
+    stream: stream,
   };
 })();

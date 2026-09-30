@@ -14,7 +14,10 @@
 
   Object.keys(STEPS).forEach(function (num) {
     var cfg = STEPS[num];
-    var ready = !!cfg.step;
+    // Рабочим пункт делает любой из трёх видов действия. Проверка
+    // только на cfg.step гасила уже готовые сборку и инструменты:
+    // бэкенд их умел, а карточка молчала «Скоро».
+    var ready = !!(cfg.step || cfg.tool || cfg.assemble);
 
     var card = document.createElement('button');
     // Класс 'muted' только приглушает вид: карточка остаётся рабочей
@@ -25,7 +28,7 @@
 
     var tag = document.createElement('span');
     if (cfg.free) { tag.className = 'tag free'; tag.textContent = 'Бесплатно'; }
-    else if (!ready) { tag.className = 'tag soon'; tag.textContent = 'В ретро'; }
+    else if (!ready) { tag.className = 'tag soon'; tag.textContent = 'Скоро'; }
     if (tag.className) card.appendChild(tag);
 
     var n = document.createElement('span');
@@ -41,15 +44,11 @@
     p.textContent = cfg.short;
     card.appendChild(p);
 
-    if (ready) {
-      card.onclick = function () { openSheet(num); };
-    } else {
-      // Здесь эти пункты не реализованы, но в ретро-интерфейсе они
-      // работают. Отправлять пользователя в тупик нельзя: уводим туда,
-      // где нужное ему действие есть.
-      card.title = 'Пункт работает в основном интерфейсе — откроется он';
-      card.onclick = function () { window.location.href = '/?intro=off'; };
-    }
+    card.onclick = function () {
+      if (cfg.assemble) window.ModernSheets.openAssemble();
+      else if (cfg.tool) window.ModernSheets.openTool(cfg);
+      else openSheet(num);
+    };
     grid.appendChild(card);
   });
 
@@ -69,8 +68,17 @@
     if (e.key === 'Escape') closeSheet();
   }
 
-  function openSheet(num) {
-    var cfg = STEPS[num];
+  /**
+   * Пустое модальное окно с шапкой и телом.
+   *
+   * Вынесено из openSheet, потому что окон стало четыре вида: шаги
+   * генерации, настройки, инструменты и сборка. Рисовать шапку с
+   * крестиком в каждом — верный способ получить четыре слегка разных
+   * окна и ловить расхождения глазами.
+   *
+   * @returns {{body: HTMLElement, sheet: HTMLElement, close: function}}
+   */
+  function openShell(title) {
     closeSheet();
 
     scrim = document.createElement('div');
@@ -83,14 +91,13 @@
     sheet.className = 'sheet';
     sheet.setAttribute('role', 'dialog');
     sheet.setAttribute('aria-modal', 'true');
-    sheet.setAttribute('aria-label', cfg.title);
+    sheet.setAttribute('aria-label', title);
     scrim.appendChild(sheet);
 
-    // --- шапка
     var head = document.createElement('div');
     head.className = 'sheet-head';
     var h2 = document.createElement('h2');
-    h2.textContent = cfg.title;
+    h2.textContent = title;
     head.appendChild(h2);
     var x = document.createElement('button');
     x.className = 'x';
@@ -100,10 +107,21 @@
     head.appendChild(x);
     sheet.appendChild(head);
 
-    // --- тело
     var body = document.createElement('div');
     body.className = 'sheet-body';
     sheet.appendChild(body);
+
+    document.body.appendChild(scrim);
+    document.body.style.overflow = 'hidden';
+    document.addEventListener('keydown', onEsc);
+
+    return { body: body, sheet: sheet, close: closeSheet };
+  }
+
+  function openSheet(num) {
+    var cfg = STEPS[num];
+    var shell = openShell(cfg.title);
+    var body = shell.body;
 
     var label = document.createElement('label');
     label.className = 'field';
@@ -225,6 +243,7 @@
       window.StudCore.generate({
         step: cfg.step,
         input: value,
+        settings: window.StudCore.getSettings(),
         onDelta: function (delta) {
           if (!result) { waitStage = 'Пишу ответ'; waitFrom = Date.now(); showWait(); }
           result += delta;
@@ -274,13 +293,12 @@
       }
     });
 
-    document.body.appendChild(scrim);
-    document.body.style.overflow = 'hidden';
-    document.addEventListener('keydown', onEsc);
     input.focus();
   }
 
   // ------------------------------------------------------- навигация
+
+  window.ModernUI = { openShell: openShell, close: closeSheet };
 
   document.getElementById('btn-retro').onclick = function () {
     // Возврат к ретро - к случайной теме, как при обычном входе.
@@ -293,7 +311,6 @@
   };
 
   document.getElementById('btn-settings').onclick = function () {
-    alert('Настройки работы появятся здесь: тема, вуз, методичка, объёмы.\n'
-        + 'Пока их можно задать в ретро-режиме.');
+    window.ModernSheets.openSettings();
   };
 })();

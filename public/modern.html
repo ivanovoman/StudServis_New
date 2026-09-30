@@ -132,6 +132,53 @@
   .card.muted { opacity: .62; }
   .card.muted .num { background: var(--text-soft); }
 
+
+  /* --- Формы настроек и инструментов --- */
+  .frow { margin-bottom: 14px; }
+  .hint {
+    font-size: 13px; color: var(--text-soft);
+    line-height: 1.5; margin-bottom: 14px;
+  }
+  .radios { display: flex; gap: 16px; flex-wrap: wrap; }
+  .radio {
+    display: inline-flex; align-items: center; gap: 6px;
+    font-size: 14px; cursor: pointer;
+  }
+  .radio input { width: auto; margin: 0; }
+
+  /* --- Ход сборки --- */
+  .bar-wrap {
+    height: 6px; border-radius: 3px; background: var(--line);
+    overflow: hidden; margin: 4px 0 14px;
+  }
+  .bar {
+    height: 100%; width: 0; border-radius: 3px;
+    background: var(--accent); transition: width .3s ease;
+  }
+  .piece {
+    padding: 8px 10px; margin-bottom: 6px;
+    border-left: 3px solid var(--accent); background: var(--bg-soft);
+    border-radius: 0 8px 8px 0;
+  }
+  .piece.bad { border-left-color: #d9534f; }
+
+  /* --- Результаты инструментов --- */
+  .warn-line { color: var(--warn); font-size: 14px; margin: 6px 0; }
+  .ok-line { color: var(--ok); font-size: 14px; margin: 6px 0; }
+  .score { font-size: 17px; font-weight: 600; margin-bottom: 4px; }
+  .finding {
+    padding: 8px 10px; margin-bottom: 8px;
+    border-left: 3px solid var(--warn); background: var(--bg-soft);
+    border-radius: 0 8px 8px 0;
+  }
+  .finding.strong { border-left-color: #d9534f; }
+  .ftitle { font-size: 14px; font-weight: 600; }
+  .fadvice { font-size: 13px; color: var(--text-soft); margin-top: 3px; }
+  .biblio {
+    white-space: pre-wrap; font-size: 13px; line-height: 1.6;
+    background: var(--bg-soft); padding: 12px; border-radius: 8px;
+  }
+
   /* --- Модальное окно --- */
   .scrim {
     position: fixed; inset: 0; z-index: 100;
@@ -291,5 +338,6 @@
 
 <script src="app-core.js"></script>
 <script src="modern.js"></script>
+<script src="modern-sheets.js"></script>
 </body>
 </html>
