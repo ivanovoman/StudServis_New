@@ -303,4 +303,28 @@
   document.getElementById('btn-settings').onclick = function () {
     window.ModernSheets.openSettings();
   };
+
+  document.getElementById('btn-works').onclick = function () {
+    window.ModernAccount.openWorks();
+  };
+
+  document.getElementById('btn-pay').onclick = function () {
+    window.ModernAccount.openPayments();
+  };
+
+  var accountBtn = document.getElementById('btn-account');
+  accountBtn.onclick = function () {
+    if (window.ModernAccount.current()) window.ModernAccount.openProfile();
+    else window.ModernAccount.openAuth();
+  };
+
+  // Надпись на кнопке зависит от того, вошли или нет. Подписываемся,
+  // а не проверяем один раз: вход и выход происходят в модальных
+  // окнах, и шапка должна отражать это сразу.
+  window.ModernAccount.subscribe(function (user) {
+    accountBtn.textContent = user
+      ? (user.display_name || user.email || 'Учётная запись')
+      : 'Войти';
+  });
+  window.ModernAccount.refresh();
 })();

@@ -55,6 +55,77 @@
   };
 
 
+
+  // -------------------------------------- владелец работ и вход
+
+  var OWNER_KEY_NAME = 'studrabots.ownerKey';
+  var TOKEN_KEY = 'studrabots.token';
+
+  /**
+   * Ключ устройства: по нему сервер узнаёт работы, собранные до входа.
+   *
+   * Вход добровольный — бесплатные функции не должны требовать учётной
+   * записи. Поэтому владельцем сначала выступает браузер, а при входе
+   * накопленные работы привязываются к учётной записи (claim_works на
+   * стороне бэкенда).
+   */
+  function ownerKey() {
+    try {
+      var key = localStorage.getItem(OWNER_KEY_NAME) || '';
+      if (!key) {
+        if (window.crypto && crypto.randomUUID) {
+          key = crypto.randomUUID().replace(/-/g, '');
+        } else {
+          key = String(Date.now())
+              + Math.random().toString(16).slice(2)
+              + Math.random().toString(16).slice(2);
+        }
+        localStorage.setItem(OWNER_KEY_NAME, key);
+      }
+      return key;
+    } catch (e) {
+      // Приватный режим: работы соберутся, но после перезагрузки к ним
+      // уже не вернуться — ключ будет другой.
+      if (!window.__studTempKey) {
+        window.__studTempKey = 'temp' + String(Date.now())
+                             + Math.random().toString(16).slice(2);
+      }
+      return window.__studTempKey;
+    }
+  }
+
+  function getToken() {
+    try {
+      return localStorage.getItem(TOKEN_KEY) || '';
+    } catch (e) {
+      return window.__studToken || '';
+    }
+  }
+
+  function setToken(token) {
+    try {
+      if (token) localStorage.setItem(TOKEN_KEY, token);
+      else localStorage.removeItem(TOKEN_KEY);
+    } catch (e) {
+      window.__studToken = token || '';
+    }
+  }
+
+  /**
+   * Заголовки владельца для запросов к бэкенду.
+   *
+   * X-Owner-Key нужен всегда, Authorization — только если вошли.
+   * Node пересылает в Python лишь явно перечисленные заголовки, эти
+   * два в списке есть.
+   */
+  function ownerHeaders(extra) {
+    var h = extra || {};
+    h['X-Owner-Key'] = ownerKey();
+    var token = getToken();
+    if (token) h['Authorization'] = 'Bearer ' + token;
+    return h;
+  }
+
   // ------------------------------------------------- настройки работы
 
   var SETTINGS_KEY = 'studrabots.settings';
@@ -128,7 +199,7 @@
   function generate(opts) {
     fetch('/api/generate', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: ownerHeaders({ 'Content-Type': 'application/json' }),
       body: JSON.stringify({
         step: opts.step,
         input: opts.input,
@@ -198,7 +269,7 @@
   function stream(url, body, onEvent, onDone) {
     fetch(url, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: ownerHeaders({ 'Content-Type': 'application/json' }),
       body: JSON.stringify(body),
     }).then(function (res) {
       if (!res.ok) {
@@ -261,6 +332,74 @@
     });
   }
 
+
+  /**
+   * Собирает .docx всей работы из её частей.
+   *
+   * Эндпоинт ждёт введение и заключение отдельно от разделов, а
+   * заголовки — словарём по номерам, иначе документ получится слитным
+   * текстом без структуры по ГОСТ. Раскладка одна и та же и после
+   * сборки, и при скачивании сохранённой работы, поэтому живёт здесь:
+   * разошлись бы — один из путей молча отдавал бы кривой файл.
+   *
+   * @param {Array} pieces   части работы: {kind, number, heading, text}
+   * @param {object} opts    {settings, sources}
+   */
+  function exportFullDocx(pieces, opts) {
+    opts = opts || {};
+    var settings = opts.settings || getSettings();
+
+    var intro = '';
+    var conclusion = '';
+    var sections = [];
+    var sectionTitles = {};
+
+    (pieces || []).forEach(function (p) {
+      if (p.kind === 'introduction') intro = p.text;
+      else if (p.kind === 'conclusion') conclusion = p.text;
+      else {
+        sections.push({ number: p.number, text: p.text, table: p.table });
+        if (p.heading) {
+          sectionTitles[p.number] = String(p.heading).replace(/^[\d.]+\s*/, '');
+        }
+      }
+    });
+
+    var topic = settings.topic || opts.topic || 'Курсовая работа';
+
+    return fetch('/api/export-docx-full', {
+      method: 'POST',
+      headers: ownerHeaders({ 'Content-Type': 'application/json' }),
+      body: JSON.stringify({
+        topic: topic,
+        introduction: intro,
+        sections: sections,
+        conclusion: conclusion,
+        sectionTitles: sectionTitles,
+        sources: opts.sources || [],
+        titlePage: {
+          topic: topic,
+          university: settings.university || '',
+        },
+      }),
+    }).then(function (r) {
+      if (!r.ok) {
+        return r.json().then(function (j) {
+          throw new Error(j.error || ('сервер ответил ' + r.status));
+        });
+      }
+      return r.blob();
+    }).then(function (blob) {
+      var a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = topic.slice(0, 60) + '.docx';
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      setTimeout(function () { URL.revokeObjectURL(a.href); }, 10000);
+    });
+  }
+
   window.StudCore = {
     STEPS: STEPS,
     generate: generate,
@@ -268,5 +407,10 @@
     getSettings: getSettings,
     saveSettings: saveSettings,
     stream: stream,
+    ownerKey: ownerKey,
+    ownerHeaders: ownerHeaders,
+    getToken: getToken,
+    setToken: setToken,
+    exportFullDocx: exportFullDocx,
   };
 })();

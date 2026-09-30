@@ -9,6 +9,7 @@
  *
  * Запуск:
  *   node tools/run-assemble.js --plan-file /tmp/plan.txt --out /tmp/work.json
+ *   node tools/run-assemble.js --plan-file /tmp/plan.txt --owner-key abc123…
  */
 
 const fs = require('fs');
@@ -32,7 +33,13 @@ const dense = (s) => s.replace(/\s/g, '').length;
   const res = await fetch(`${BASE}/api/assemble`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ plan, settings, ownerKey: 'acceptance-run' }),
+    // --owner-key позволяет проверить, что работа действительно
+    // сохраняется: с тем же ключом её потом видно в /api/v1/works.
+    body: JSON.stringify({
+      plan,
+      settings,
+      ownerKey: arg('owner-key', 'acceptance-run'),
+    }),
   });
 
   if (!res.ok) {

@@ -66,6 +66,38 @@
         placeholder: 'Требования к объёму, оформлению, структуре — как в '
                    + 'методичке' }));
 
+    // Методичку нужно уметь приложить файлом. Просить человека
+    // скопировать двадцать страниц из PDF — значит получить обрывок
+    // без требований к объёму, то есть худший результат.
+    var methFile = document.createElement('input');
+    methFile.type = 'file';
+    methFile.accept = '.pdf,.docx,.txt,.md,.rtf';
+    field(body, 'Или загрузите файл методички', methFile);
+    var methStatus = el('div', 'hint');
+    body.appendChild(methStatus);
+
+    methFile.onchange = function () {
+      if (!methFile.files.length) return;
+      var form = new FormData();
+      form.append('file', methFile.files[0]);
+      methStatus.textContent = 'Разбираю методичку…';
+      fetch('/api/v1/projects/upload/methodichka', {
+        method: 'POST', body: form,
+      })
+        .then(function (r) { return r.json(); })
+        .then(function (d) {
+          if (d.detail) { methStatus.textContent = 'Ошибка: ' + d.detail; return; }
+          meth.value = d.text || '';
+          var found = (d.found || []).map(function (f) {
+            return f.field + ' = ' + f.value;
+          }).join(', ');
+          methStatus.textContent = found
+            ? 'Распознано: ' + found + '. Проверьте перед запуском.'
+            : 'Текст загружен, требования распознать не удалось.';
+        })
+        .catch(function (e) { methStatus.textContent = 'Ошибка: ' + e.message; });
+    };
+
     var wishes = field(body, 'Пожелания к работе',
       Object.assign(el('textarea'), { rows: 2, value: s.wishes || '',
         placeholder: 'Например: больше судебной практики, без таблиц' }));
@@ -391,6 +423,7 @@
     body.appendChild(out);
 
     var collected = [];
+    var usedSources = [];
     var legal = null;
 
     run.onclick = function () {
@@ -398,6 +431,7 @@
       if (!plan) { status.textContent = 'Нужен план'; return; }
 
       collected = [];
+      usedSources = [];
       legal = null;
       out.textContent = '';
       dl.style.display = 'none';
@@ -411,7 +445,10 @@
       window.StudCore.stream('/api/assemble', {
         plan: plan,
         settings: window.StudCore.getSettings(),
-        ownerKey: window.StudWorks ? window.StudWorks.ownerKey() : '',
+        // Ключ устройства обязателен: по нему сервер сохраняет работу
+        // по частям. Раньше здесь стоял StudWorks, которого в этом
+        // интерфейсе нет, — и трёхминутная сборка никуда не писалась.
+        ownerKey: window.StudCore.ownerKey(),
       }, function (ev) {
         if (ev.outline) {
           out.appendChild(el('div', 'ok-line',
@@ -420,6 +457,8 @@
         }
 
         if (ev.sources) {
+          // Держим список: по нему маркеры [3] станут сносками в .docx.
+          usedSources = ev.sources;
           out.appendChild(el('div', 'hint',
             'Опора: публикаций — ' + ev.sources.length));
         }
@@ -488,29 +527,8 @@
     dl.onclick = function () {
       if (!collected.length) return;
       status.textContent = 'Собираю файл…';
-      fetch('/api/export-docx-full', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          title: window.StudCore.getSettings().topic || 'Курсовая работа',
-          sections: collected.map(function (p) {
-            return { number: p.number, text: p.text, table: p.table };
-          }),
-        }),
-      })
-        .then(function (r) {
-          if (!r.ok) throw new Error('сервер ответил ' + r.status);
-          return r.blob();
-        })
-        .then(function (blob) {
-          var a = document.createElement('a');
-          a.href = URL.createObjectURL(blob);
-          a.download = (window.StudCore.getSettings().topic || 'Работа')
-            .slice(0, 60) + '.docx';
-          a.click();
-          URL.revokeObjectURL(a.href);
-          status.textContent = 'Файл скачан';
-        })
+      window.StudCore.exportFullDocx(collected, { sources: usedSources })
+        .then(function () { status.textContent = 'Файл скачан'; })
         .catch(function (e) {
           status.textContent = 'Ошибка экспорта: ' + e.message;
         });

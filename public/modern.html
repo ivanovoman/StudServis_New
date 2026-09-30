@@ -318,6 +318,9 @@
     <span class="brand">Сервис студенческих работ</span>
     <nav>
       <button id="btn-settings">Настройки</button>
+      <button id="btn-works">Мои работы</button>
+      <button id="btn-pay">Оплата</button>
+      <button id="btn-account">Войти</button>
     </nav>
   </div>
 </header>
@@ -335,8 +338,13 @@
   работа к сдаче. Проверяйте нормы, номера дел и цитаты по первоисточникам.
 </footer>
 
+<!-- Порядок важен: modern.js при загрузке подписывается на состояние
+     входа, поэтому модули, которые он зовёт, должны быть определены
+     раньше. Сами они обращаются к каркасу окна только внутри
+     обработчиков, к тому времени он уже есть. -->
 <script src="app-core.js"></script>
-<script src="modern.js"></script>
 <script src="modern-sheets.js"></script>
+<script src="modern-account.js"></script>
+<script src="modern.js"></script>
 </body>
 </html>
