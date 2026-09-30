@@ -8,9 +8,36 @@ const { fixHybrids } = require('./textfix');
 const { generateFragmentDocx, generateFullDocx } = require('./docxExport');
 const { resolveProviders, modelsFor } = require('./providers');
 
+const START_TIME = new Date().toISOString();
+
 const app = express();
 app.use(express.json({ limit: '1mb' }));
-app.use(express.static(path.join(__dirname, '..', 'public')));
+// no-cache на статику: браузер обязан переспросить, не изменился ли
+// файл. Отдача при этом остаётся дешёвой — на неизменённый файл уходит
+// 304 без тела. Без этого заголовка после git pull пользователь
+// продолжает видеть старый интерфейс из кеша и считает, что правки не
+// приехали; на приёмке так и вышло.
+app.use(express.static(path.join(__dirname, '..', 'public'), {
+  etag: true,
+  lastModified: true,
+  setHeaders: function (res) {
+    res.setHeader('Cache-Control', 'no-cache');
+  },
+}));
+
+// Версия запущенного кода: помогает отличить «правки не приехали» от
+// «браузер показывает старое из кеша», не заходя в консоль git.
+app.get('/api/version', function (req, res) {
+  var out = { commit: null, started: START_TIME };
+  try {
+    out.commit = require('child_process')
+      .execSync('git rev-parse --short HEAD', { cwd: path.join(__dirname, '..') })
+      .toString().trim();
+  } catch (err) {
+    out.commit = 'неизвестно (git недоступен)';
+  }
+  res.json(out);
+});
 
 // Запросы /api/v1/* обслуживает Python-бэкенд (FastAPI): загрузка
 // источников и методички, анализ темы с опорой на публикации,
