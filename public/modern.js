@@ -17,13 +17,15 @@
     var ready = !!cfg.step;
 
     var card = document.createElement('button');
-    card.className = 'card' + (ready ? '' : ' disabled');
+    // Класс 'muted' только приглушает вид: карточка остаётся рабочей
+    // ссылкой в ретро-интерфейс, поэтому aria-disabled ей не ставим —
+    // иначе скринридер объявит кликабельный элемент недоступным.
+    card.className = 'card' + (ready ? '' : ' muted');
     card.type = 'button';
-    if (!ready) card.setAttribute('aria-disabled', 'true');
 
     var tag = document.createElement('span');
     if (cfg.free) { tag.className = 'tag free'; tag.textContent = 'Бесплатно'; }
-    else if (!ready) { tag.className = 'tag soon'; tag.textContent = 'Скоро'; }
+    else if (!ready) { tag.className = 'tag soon'; tag.textContent = 'В ретро'; }
     if (tag.className) card.appendChild(tag);
 
     var n = document.createElement('span');
@@ -39,7 +41,15 @@
     p.textContent = cfg.short;
     card.appendChild(p);
 
-    if (ready) card.onclick = function () { openSheet(num); };
+    if (ready) {
+      card.onclick = function () { openSheet(num); };
+    } else {
+      // Здесь эти пункты не реализованы, но в ретро-интерфейсе они
+      // работают. Отправлять пользователя в тупик нельзя: уводим туда,
+      // где нужное ему действие есть.
+      card.title = 'Пункт работает в основном интерфейсе — откроется он';
+      card.onclick = function () { window.location.href = '/?intro=off'; };
+    }
     grid.appendChild(card);
   });
 
@@ -202,23 +212,34 @@
       sources.style.display = 'none';
       if (errBox) { errBox.remove(); errBox = null; }
       run.disabled = true;
-      setStatus('Ищу источники', true);
+      // До первой буквы ответа проходит 15-40 секунд. Показываем этап
+      // и секунды, иначе неподвижная надпись читается как зависание.
+      var waitFrom = Date.now();
+      var waitStage = 'Ищу источники';
+      var waitTimer = setInterval(showWait, 1000);
+      function showWait() {
+        setStatus(waitStage + ' — ' + Math.round((Date.now() - waitFrom) / 1000) + ' с', true);
+      }
+      showWait();
 
       window.StudCore.generate({
         step: cfg.step,
         input: value,
         onDelta: function (delta) {
-          if (!result) setStatus('Генерация', true);
+          if (!result) { waitStage = 'Пишу ответ'; waitFrom = Date.now(); showWait(); }
           result += delta;
           out.textContent = result;
           out.scrollTop = out.scrollHeight;
         },
         onEvent: function (ev) {
-          if (ev.sources) renderSources(ev.sources);
-          else if (ev.notice) renderNotice(ev.notice);
+          if (ev.sources) {
+            renderSources(ev.sources);
+            if (!result) { waitStage = 'Источники найдены, думает модель'; waitFrom = Date.now(); showWait(); }
+          } else if (ev.notice) renderNotice(ev.notice);
         },
         onDone: function (err) {
           busy = false;
+          clearInterval(waitTimer);
           run.disabled = false;
           if (err) {
             setStatus('', false);

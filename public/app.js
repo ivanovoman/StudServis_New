@@ -281,16 +281,17 @@
       legalBox.style.display = 'none';
       legalBox.textContent = '';
       docxBtn.style.display = 'none';
-      status.textContent = 'Ищу источники…';
+      var clock = makeWaitClock(status);
       runBtn.disabled = true;
 
       streamGenerate(cfg.step, topic, function onDelta(delta) {
-        if (!lastResult) status.textContent = 'Генерация…';
+        if (!lastResult) clock.setStage('Пишу ответ');
         lastResult += delta;
         output.textContent = lastResult;
         output.scrollTop = output.scrollHeight;
       }, function onDone(err) {
         generating = false;
+        clock.stop();
         runBtn.disabled = false;
         if (err) {
           status.textContent = 'Ошибка: ' + err;
@@ -299,8 +300,12 @@
           if (lastResult.trim()) docxBtn.style.display = '';
         }
       }, function onEvent(ev) {
-        if (ev.sources) renderSources(ev.sources);
-        else if (ev.notice) renderNotice(ev.notice);
+        if (ev.sources) {
+          renderSources(ev.sources);
+          // Поиск закончился, дальше думает модель. Без смены надписи
+          // непонятно, на каком из двух долгих этапов мы стоим.
+          if (!lastResult) clock.setStage('Источники найдены, думает модель');
+        } else if (ev.notice) renderNotice(ev.notice);
         else if (ev.legal) renderLegal(ev.legal);
       });
     };
@@ -881,6 +886,32 @@
     });
 
     settingsBtn.parentNode.insertBefore(btn, settingsBtn.nextSibling);
+  }
+
+  /**
+   * Счётчик ожидания в строке состояния.
+   *
+   * До первой буквы ответа проходит 15-40 секунд: сначала поиск по
+   * четырём базам, потом модель думает. Неподвижная надпись «Ищу
+   * источники…» всё это время выглядит как зависший сервис — на
+   * приёмке так и прочитали. Показываем, что именно происходит и
+   * сколько идёт.
+   */
+  function makeWaitClock(statusEl) {
+    var started = Date.now();
+    var stage = 'Ищу источники';
+    var timer = setInterval(tick, 1000);
+    tick();
+
+    function tick() {
+      var secs = Math.round((Date.now() - started) / 1000);
+      statusEl.textContent = stage + '… ' + secs + ' с';
+    }
+
+    return {
+      setStage: function (text) { stage = text; started = Date.now(); tick(); },
+      stop: function () { clearInterval(timer); },
+    };
   }
 
   // Кнопка настроек тускнеет, когда активный пункт в них не нуждается.
