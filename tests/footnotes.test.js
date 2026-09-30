@@ -175,3 +175,18 @@ test('чистое название раздела не портится', async
   const text = await docxText(buf);
   assert.ok(text.includes('2.3. Судебная практика'));
 });
+
+// --- Объём разбора темы (заказчик просил 6000 знаков) ---
+
+const { STEP_PROMPTS } = require('../api/prompts.js');
+
+test('промпт разбора темы задаёт объём', () => {
+  assert.match(STEP_PROMPTS.analysis, /6000-7000 знаков без пробелов/);
+});
+
+test('есть отдельный промпт для дополнения разбора', () => {
+  assert.ok(STEP_PROMPTS.analysis_expand, 'промпт analysis_expand пропал');
+  // Добор бесполезен, если модель начнёт пересказывать написанное.
+  assert.match(STEP_PROMPTS.analysis_expand, /ТОЛЬКО новое/);
+  assert.match(STEP_PROMPTS.analysis_expand, /Запрещено добирать объём водой/);
+});

@@ -384,6 +384,96 @@ function shortError(text) {
 }
 
 
+/**
+ * Объём разбора темы, знаков без пробелов.
+ *
+ * Заказчик просил 6000. Модель почти всегда останавливается раньше:
+ * называет тезис и считает мысль высказанной. Просить «пиши длиннее»
+ * бесполезно — получается вода, поэтому объём добирается вторым
+ * вызовом с отдельным промптом, как это давно сделано для разделов.
+ */
+const ANALYSIS_TARGET = 6000;
+// Ниже этой границы добираем. Между границей и целью не трогаем:
+// гнаться за последними сотнями знаков — значит платить лишним
+// запросом за строчку текста.
+const ANALYSIS_MIN = 5500;
+
+/**
+ * Дописывает разбор темы, если он вышел короче нужного, и стримит
+ * продолжение в тот же поток. Возвращает дописанный текст.
+ */
+async function expandAnalysis(fullText, baseMessages, res) {
+  const have = charsNoSpace(fullText);
+  if (have >= ANALYSIS_MIN) return fullText;
+
+  const need = Math.max(400, ANALYSIS_TARGET - have);
+  res.write(`data: ${JSON.stringify({
+    notice: `Разбор вышел на ${have} знаков без пробелов — дополняю `
+          + 'до нужного объёма.',
+  })}\n\n`);
+
+  // Системные блоки исходного запроса (тема, настройки, источники)
+  // нужны и здесь, меняется только роль: не «разбери», а «дополни».
+  // Исходный промпт разбора отбрасываем: иначе модель начнёт разбор
+  // заново. Сравнивать с шаблоном нельзя — в нём уже подставлены
+  // правила о числе глав, поэтому узнаём его по заголовку этапа.
+  const messages = baseMessages
+    .filter((m) => m.role === 'system'
+                && !String(m.content).includes('ТЕКУЩИЙ ЭТАП: АНАЛИЗ ТЕМЫ'))
+    .concat([
+      { role: 'system', content: STEP_PROMPTS.analysis_expand },
+      {
+        role: 'user',
+        content: `УЖЕ СДЕЛАННЫЙ РАЗБОР:\n\n${fullText}\n\n`
+               + `Допиши примерно ${need} знаков без пробелов — только `
+               + 'новое содержание, продолжающее эти заметки.',
+      },
+    ]);
+
+  let added = '';
+  try {
+    const { upstream } = await callOpenRouterWithFallback(messages);
+    const reader = upstream.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split('\n');
+      buffer = lines.pop();
+
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (!trimmed.startsWith('data:')) continue;
+        const data = trimmed.slice(5).trim();
+        if (data === '[DONE]') continue;
+        try {
+          const parsed = JSON.parse(data);
+          const choice = parsed.choices?.[0];
+          const delta = choice?.delta?.content
+            || choice?.delta?.reasoning_content || '';
+          if (delta) {
+            added += delta;
+            res.write(`data: ${JSON.stringify({ delta })}\n\n`);
+          }
+        } catch {
+          // не JSON — пропускаем
+        }
+      }
+    }
+  } catch (e) {
+    // Добор не удался — разбор уже отдан пользователю, терять его
+    // из-за этого нельзя.
+    console.error('Дополнение разбора не удалось:', e.message);
+    return fullText;
+  }
+
+  if (charsNoSpace(added) < 200) return fullText;
+  return `${fullText.trim()}\n\n${added.trim()}`;
+}
+
 app.post('/api/generate', async (req, res) => {
   const { step, input, history, settings } = req.body;
 
@@ -497,6 +587,12 @@ app.post('/api/generate', async (req, res) => {
         error: `модель ${usedModel} вернула пустой ответ. `
              + 'Нажмите «Выполнить» ещё раз — запрос уйдёт на другую модель.',
       })}\n\n`);
+    }
+
+    // Разбор темы добираем до нужного объёма: заказчик просил 6000
+    // знаков без пробелов, модель сама столько не пишет.
+    if (sentAny && step === 'analysis') {
+      fullText = await expandAnalysis(fullText, messages, res);
     }
 
     // Обрыв по пределу длины — не ошибка запроса, текст пришёл. Но
