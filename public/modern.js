@@ -300,16 +300,6 @@
 
   window.ModernUI = { openShell: openShell, close: closeSheet };
 
-  document.getElementById('btn-retro').onclick = function () {
-    // Возврат к ретро - к случайной теме, как при обычном входе.
-    //
-    // Заставку при этом НЕ перезапускаем: она заканчивается переходом
-    // в современный интерфейс, и человек, который только что попросил
-    // ретро, оказался бы выброшен обратно. Отметку о просмотре
-    // оставляем на месте - в этой сессии вступление уже видели.
-    window.location.href = '/?intro=off';
-  };
-
   document.getElementById('btn-settings').onclick = function () {
     window.ModernSheets.openSettings();
   };

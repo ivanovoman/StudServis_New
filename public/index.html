@@ -11,24 +11,43 @@
 </head>
 <body>
     <script>
-        // Вход всегда через случайную ретро-тему: это лицо сервиса и
-        // начало сценария «из прошлого в будущее». Современный
-        // интерфейс - то, куда приходят, а не то, с чего начинают,
-        // поэтому автоматических перенаправлений на него здесь нет.
+        // Ретро - вступление, а не рабочее место. Случайная ретро-тема
+        // играет заставку «из прошлого в будущее» один раз за сессию и
+        // передаёт человека современному интерфейсу; всё остальное
+        // время вход ведёт прямо туда. Раньше при уже просмотренной
+        // заставке пользователь оставался в ретро-меню и работал в нём.
         var params = new URLSearchParams(window.location.search);
+        var SEEN_KEY = "studservis_intro_seen";
 
-        // ?theme=Windows_95.html — открыть конкретную тему (для отладки)
-        var requested = params.get("theme");
-        var theme = THEMES.includes(requested)
-            ? requested
-            : THEMES[Math.floor(Math.random() * THEMES.length)];
+        // ?retro=1 - открыть ретро-меню принудительно. Нужно для
+        // отладки самих тем: их 16, и проверять их как-то надо.
+        var forceRetro = params.get("retro") === "1";
 
-        // Параметры заставки пробрасываем в тему: ?intro=off выключает,
-        // ?intro=1 показывает принудительно.
+        var seen = false;
+        try {
+            seen = sessionStorage.getItem(SEEN_KEY) === "1";
+        } catch (e) {
+            // Приватный режим: считаем, что заставку ещё не видели.
+        }
+
         var intro = params.get("intro");
-        var suffix = intro ? ("?intro=" + encodeURIComponent(intro)) : "";
 
-        window.location.replace("themes/" + theme + suffix);
+        if (!forceRetro && (seen || intro === "off")) {
+            window.location.replace("modern.html");
+        } else {
+            // ?theme=Windows_95.html — открыть конкретную тему (для отладки)
+            var requested = params.get("theme");
+            var theme = THEMES.includes(requested)
+                ? requested
+                : THEMES[Math.floor(Math.random() * THEMES.length)];
+
+            var parts = [];
+            if (intro) parts.push("intro=" + encodeURIComponent(intro));
+            if (forceRetro) parts.push("retro=1");
+            var suffix = parts.length ? ("?" + parts.join("&")) : "";
+
+            window.location.replace("themes/" + theme + suffix);
+        }
     </script>
     <noscript>
         <p style="color:#ffb000;font-family:monospace;">

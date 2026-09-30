@@ -31,6 +31,11 @@
   var force = params.get('intro') === '1';
   var disabled = params.get('intro') === 'off';
 
+  // ?retro=1 — ретро-меню открыто намеренно (отладка тем). В этом
+  // случае заставка не уводит в современный интерфейс: человек пришёл
+  // смотреть именно ретро, и выбрасывать его оттуда невежливо.
+  var stayInRetro = params.get('retro') === '1';
+
   // Уважаем системную настройку: если человек просил меньше движения,
   // анимацию не навязываем.
   var reduceMotion = window.matchMedia
@@ -38,6 +43,14 @@
 
   if (disabled || (!force && (sessionStorage.getItem(SEEN_KEY)
       || reduceMotion))) {
+    // Заставку не показываем — но и в ретро-меню не бросаем: оно
+    // вступление, а не рабочее место. Случай важен для тех, кто
+    // отключил анимации в системе: без этого они видели бы ретро
+    // всегда и ни разу — современный интерфейс.
+    if (!stayInRetro) {
+      sessionStorage.setItem(SEEN_KEY, '1');
+      window.location.replace('/modern.html');
+    }
     return;
   }
 
@@ -84,6 +97,16 @@
     document.removeEventListener('keydown', onSkipKey);
     if (layer.parentNode) layer.remove();
     restoreHighlights();
+
+    // Пропуск — это «не хочу смотреть вступление», а не «хочу работать
+    // в ретро». Раньше Esc оставлял человека в ретро-меню, и он
+    // обнаруживал себя не в том интерфейсе, в котором ждали.
+    if (!stayInRetro) goModern();
+  }
+
+  function goModern() {
+    sessionStorage.setItem(SEEN_KEY, '1');
+    window.location.href = '/modern.html';
   }
 
   // Подсветку наводим через инлайновый стиль, чтобы не спорить с CSS
@@ -297,8 +320,8 @@
     flash.style.opacity = '1';
     await wait(300);
 
-    sessionStorage.setItem(SEEN_KEY, '1');
-    window.location.href = '/modern.html';
+    if (stayInRetro) { cleanup(); return; }
+    goModern();
   }
 
   // ------------------------------------------------------ сценарий

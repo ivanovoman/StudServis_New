@@ -8,7 +8,8 @@
     "start": "node api/start.js",
     "dev": "node --watch api/start.js",
     "check:gigachat": "node tools/check-gigachat.js",
-    "check:modern": "node tools/check-modern.js"
+    "check:modern": "node tools/check-modern.js",
+    "check:entry": "node tools/check-entry.js"
   },
   "engines": {
     "node": ">=18"
