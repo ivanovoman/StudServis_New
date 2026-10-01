@@ -4,11 +4,18 @@ const express = require('express');
 const path = require('path');
 const { STEP_PROMPTS, applyChapters } = require('./prompts');
 const { parseOutline, buildQueue } = require('./outline');
+const { createQueue } = require('./jobqueue');
 const { fixHybrids } = require('./textfix');
 const { generateFragmentDocx, generateFullDocx } = require('./docxExport');
 const { resolveProviders, modelsFor } = require('./providers');
 
 const START_TIME = new Date().toISOString();
+
+// Тяжёлые операции (сборка работы, написание раздела) идут по очереди:
+// параллельные запросы к бесплатным моделям упираются в лимиты
+// провайдера и рвутся посреди работы. Ждущий видит своё место, а не
+// молчащий экран.
+const heavyJobs = createQueue();
 
 const app = express();
 app.use(express.json({ limit: '1mb' }));
@@ -27,6 +34,10 @@ app.use(express.static(path.join(__dirname, '..', 'public'), {
 
 // Версия запущенного кода: помогает отличить «правки не приехали» от
 // «браузер показывает старое из кеша», не заходя в консоль git.
+app.get('/api/queue', function (req, res) {
+  res.json(heavyJobs.stats());
+});
+
 app.get('/api/version', function (req, res) {
   var out = { commit: null, started: START_TIME };
   try {
@@ -795,6 +806,40 @@ app.post('/api/assemble', async (req, res) => {
     total: queue.length,
   });
 
+  // Ждём очереди до начала работы: параллельные сборки упираются в
+  // лимиты провайдера и рвутся. Место в очереди сообщаем, иначе
+  // ожидание неотличимо от зависшего сервиса.
+  let releaseRaw;
+  try {
+    releaseRaw = await heavyJobs.acquire((place, total) => {
+      send({
+        queued: {
+          place,
+          total,
+          message: place === 1
+            ? 'Впереди одна работа — начнём, как только она закончится.'
+            : `Вы ${place}-й в очереди из ${total}. Начнём, как только `
+              + 'дойдёт черёд.',
+        },
+      });
+    });
+  } catch (e) {
+    send({ error: e.message });
+    res.write('data: [DONE]\n\n');
+    return res.end();
+  }
+
+  // Освобождение должно случиться ровно один раз и при любом исходе.
+  // Если оставить только вызов в конце, неожиданная ошибка посреди
+  // сборки навсегда заняла бы слот — и сервис встал бы для всех.
+  let jobReleased = false;
+  const releaseJob = () => {
+    if (jobReleased) return;
+    jobReleased = true;
+    releaseRaw();
+  };
+  res.on('close', releaseJob);
+
   const done = [];      // готовые куски
   const failed = [];    // что не получилось
   let aborted = false;
@@ -894,6 +939,11 @@ app.post('/api/assemble', async (req, res) => {
   if (!done.length && access.reason === 'spent') {
     await refundWork(req.headers.authorization);
   }
+
+  // Место в очереди освобождаем в любом случае: и после обрыва, и
+  // после ошибки. Иначе один упавший запрос навсегда занял бы слот и
+  // сервис встал бы для всех.
+  releaseJob();
 
   if (!aborted) {
     send({
@@ -1275,6 +1325,35 @@ app.post('/api/section', async (req, res) => {
   });
   const send = (obj) => res.write(`data: ${JSON.stringify(obj)}\n\n`);
 
+  // Раздел пишется быстрее сборки, но упирается в того же провайдера,
+  // поэтому очередь общая.
+  let releaseRaw;
+  try {
+    releaseRaw = await heavyJobs.acquire((place, total) => {
+      send({
+        queued: {
+          place,
+          total,
+          message: place === 1
+            ? 'Впереди одна работа — начнём, как только она закончится.'
+            : `Вы ${place}-й в очереди из ${total}.`,
+        },
+      });
+    });
+  } catch (e) {
+    send({ error: e.message });
+    res.write('data: [DONE]\n\n');
+    return res.end();
+  }
+
+  let jobReleased = false;
+  const releaseJob = () => {
+    if (jobReleased) return;
+    jobReleased = true;
+    releaseRaw();
+  };
+  res.on('close', releaseJob);
+
   try {
     // Публикации ищем по теме работы: ссылаться нужно и в одиночном
     // разделе, иначе текст окажется без опоры на литературу.
@@ -1339,6 +1418,8 @@ app.post('/api/section', async (req, res) => {
   } catch (e) {
     send({ error: e.message });
     if (access.reason === 'spent') await refundWork(req.headers.authorization);
+  } finally {
+    releaseJob();
   }
 
   res.write('data: [DONE]\n\n');

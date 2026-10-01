@@ -464,6 +464,7 @@
     var collected = [];
     var usedSources = [];
     var legal = null;
+    var queuedNote = null;
 
     run.onclick = function () {
       var plan = input.value.trim();
@@ -472,6 +473,7 @@
       collected = [];
       usedSources = [];
       legal = null;
+      queuedNote = null;
       out.textContent = '';
       dl.style.display = 'none';
       run.disabled = true;
@@ -503,6 +505,18 @@
         }
 
         if (ev.notice) warn(out, ev.notice);
+
+        // Ожидание очереди: человек должен понимать, что сервис не
+        // завис, а ждёт своей очереди, и видеть, сколько ещё впереди.
+        if (ev.queued) {
+          status.textContent = 'В очереди: место ' + ev.queued.place;
+          if (!queuedNote) {
+            queuedNote = el('div', 'warn-line', ev.queued.message);
+            out.appendChild(queuedNote);
+          } else {
+            queuedNote.textContent = ev.queued.message;
+          }
+        }
 
         if (ev.progress) {
           var p = ev.progress;

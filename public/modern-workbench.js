@@ -184,6 +184,11 @@
 
         window.StudCore.stream('/api/section', payload, function (ev) {
           if (ev.sources) sources = ev.sources;
+          if (ev.queued) {
+            // Ждём очереди — говорим об этом прямо, иначе секундомер
+            // без объяснения выглядит как зависание.
+            st.textContent = ev.queued.message;
+          }
           if (ev.expanding) st.textContent = 'Дописываю до нужного объёма…';
           if (ev.legal && (ev.legal.wrong || []).length) {
             card.appendChild(el('div', 'warn-line',
