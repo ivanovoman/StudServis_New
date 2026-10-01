@@ -15,6 +15,7 @@ os.environ.setdefault(
 from app.db import get_session_factory, init_models  # noqa: E402
 from app.modules.rag_service.library import (  # noqa: E402
     add_document,
+    get_style_samples,
     list_documents,
     remove_document,
     search_documents,
@@ -175,3 +176,106 @@ async def test_индекс_обновляется_после_загрузки(s
 
     assert hits
     assert hits[0]["source"] == "второй.pdf"
+
+
+# ------------------------------------------------------------- стиль
+
+СТАТЬИ = """Защита авторских прав
+
+Авторские права возникают сразу после создания произведения.
+Регистрация не нужна. Поэтому многие нарушают их, сами того не замечая.
+Например, берут чужое фото из интернета для своего сайта.
+
+Что делать правообладателю
+
+Сначала стоит зафиксировать нарушение. Подойдёт нотариальный осмотр
+страницы. Он стоит денег, но без него суд может не поверить.
+
+Наши специалисты подготовят заявление в суд и сопроводят дело до
+решения. Обращайтесь за бесплатной консультацией.
+
+Способы защиты
+
+Закон даёт выбор. Можно требовать убытки, а можно компенсацию.
+Компенсация проще: размер убытков доказывать не нужно.
+"""
+
+
+@pytest.mark.asyncio
+async def test_образец_стиля_не_попадает_в_тематический_поиск(session):
+    """Иначе статьи про авторское право всплывут в работе про коллизии."""
+    key = "owner-style-1111"
+    await add_document(session, owner_key=key, filename="статьи.pdf",
+                       text=СТАТЬИ, kind="стиль")
+
+    hits = await search_documents(
+        session, owner_key=key, query="защита авторских прав", limit=5)
+
+    assert hits == []
+
+
+@pytest.mark.asyncio
+async def test_образцы_стиля_отдаются_отдельно(session):
+    key = "owner-style-2222"
+    await add_document(session, owner_key=key, filename="статьи.pdf",
+                       text=СТАТЬИ, kind="стиль")
+
+    samples = await get_style_samples(session, owner_key=key, limit=3)
+
+    assert samples
+    assert any("Авторские права" in s for s in samples)
+
+
+@pytest.mark.asyncio
+async def test_рекламные_куски_не_идут_в_образец(session):
+    """Иначе в курсовой появится «мы подготовим заявление»."""
+    key = "owner-style-3333"
+    await add_document(session, owner_key=key, filename="статьи.pdf",
+                       text=СТАТЬИ, kind="стиль")
+
+    samples = await get_style_samples(session, owner_key=key, limit=5)
+    joined = " ".join(samples).lower()
+
+    assert "обращайтесь" not in joined
+    assert "наши специалисты" not in joined
+
+
+@pytest.mark.asyncio
+async def test_обычный_материал_не_считается_образцом_стиля(session):
+    key = "owner-style-4444"
+    await add_document(session, owner_key=key, filename="методичка.pdf",
+                       text=METHODICHKA, kind="методичка")
+
+    assert await get_style_samples(session, owner_key=key) == []
+    # А в тематическом поиске он, наоборот, обязан находиться.
+    assert await search_documents(session, owner_key=key,
+                                  query="оригинальность", limit=1)
+
+
+@pytest.mark.asyncio
+async def test_примечания_рецензента_вычищаются_из_образца(session):
+    """PDF со статьями приходит с правкой рецензента поверх текста."""
+    key = "owner-style-5555"
+    текст_с_правкой = (
+        "Авторские права возникают сразу после создания произведения. "
+        "Регистрация для этого не требуется, что подтверждается статьёй "
+        "1259 Гражданского кодекса.\n\n"
+        "Добавлено примечание ([РБ1]): здесь нужна ссылка на практику\n\n"
+        "Нарушением считается любое использование без согласия автора. "
+        "Например, публикация чужой фотографии на своём сайте."
+    )
+    await add_document(session, owner_key=key, filename="статьи.pdf",
+                       text=текст_с_правкой, kind="стиль")
+
+    samples = await get_style_samples(session, owner_key=key, limit=5)
+
+    assert all("примечание" not in s.lower() for s in samples)
+
+
+def test_разрывы_от_pdf_чинятся():
+    from app.modules.rag_service.library import _repair_pdf_spacing
+
+    assert _repair_pdf_spacing("защиты из -за формы") == "защиты из-за формы"
+    assert _repair_pdf_spacing("на флеш -накопителе") == "на флеш-накопителе"
+    # Висячий дефис в перечислении законен и остаётся.
+    assert _repair_pdf_spacing("теле - и радиопередачи") == "теле - и радиопередачи"

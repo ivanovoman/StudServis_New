@@ -14,6 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.db import get_session
 from app.modules.rag_service.library import (
     add_document,
+    get_style_samples,
     list_documents,
     remove_document,
     search_documents,
@@ -134,3 +135,19 @@ async def search(
         session, owner_key=key, query=payload.query, limit=payload.limit,
     )
     return {"count": len(hits), "hits": hits}
+
+
+@router.get("/style", summary="Образцы авторской манеры письма")
+async def style(
+    limit: int = 3,
+    key: str = Depends(owner_key),
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    """Отрывки из загруженных образцов стиля.
+
+    Отдаются отдельно от тематического поиска: это материал для
+    подражания манере, а не источник содержания.
+    """
+    samples = await get_style_samples(
+        session, owner_key=key, limit=max(1, min(limit, 5)))
+    return {"count": len(samples), "samples": samples}

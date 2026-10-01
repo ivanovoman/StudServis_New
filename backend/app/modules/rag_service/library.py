@@ -34,6 +34,12 @@ MAX_CHUNK = 1200
 
 MAX_DOCS_PER_OWNER = 50
 
+# Вид материала, который задаёт манеру письма, а не содержание.
+# Разделять обязательно: статьи про авторское право, попав в
+# тематический поиск, притащат авторское право в работу про коллизии.
+# У образца стиля берут ритм фразы и способ объяснять, но не предмет.
+KIND_STYLE = "стиль"
+
 
 def _now() -> datetime:
     return datetime.now(timezone.utc)
@@ -201,6 +207,69 @@ class StoredDocument:
     created_at: datetime
 
 
+# Рекламные хвосты в статьях практикующих юристов: «Мы подготовим
+# заявление», «обращайтесь к нашим специалистам». Как образец манеры
+# для курсовой они опасны — модель переймёт интонацию коммерческого
+# предложения, и в научной работе появится «мы поможем вам».
+RE_PROMO = re.compile(
+    r"\bмы (подготовим|поможем|обеспечим|сделаем|составим|защитим|"
+    r"представим|добьёмся|добьемся)\b"
+    r"|\bнаши (специалисты|юристы|адвокаты|эксперты)\b"
+    r"|\bобращайтесь\b|\bоставьте заявку\b|\bзвоните\b"
+    r"|\bстоимость услуг\b|\bбесплатная консультация\b",
+    re.IGNORECASE,
+)
+
+
+def _is_promo(text: str) -> bool:
+    return bool(RE_PROMO.search(text))
+
+
+def _strip_promo_sentences(text: str) -> str:
+    """Убирает рекламные предложения, оставляя остальной абзац.
+
+    В статьях практикующих юристов реклама вперемешку с содержанием:
+    абзац про обеспечительные меры заканчивается «мы подготовим
+    заявление». Отбрасывать такой абзац целиком жалко — пропадает
+    хороший образец манеры, — поэтому режем по предложениям.
+    """
+    sentences = re.split(r"(?<=[.!?])\s+", text)
+    kept = [s for s in sentences if not RE_PROMO.search(s)]
+    return " ".join(kept).strip()
+
+
+def _prepare_style_text(raw: str) -> str:
+    """Готовит образец стиля: чистит правку рецензента и рекламу.
+
+    Очистку применяем к каждому абзацу отдельно. Если прогнать ею весь
+    документ разом, пустые строки схлопываются, абзацы слипаются в
+    одно полотно — и нарезка по заголовкам перестаёт работать.
+    """
+    from app.modules.rag_service.ingest import clean_pdf_text
+
+    out = []
+    for para in re.split(r"\n\s*\n", raw):
+        cleaned = clean_pdf_text(para)
+        cleaned = _strip_promo_sentences(cleaned)
+        if cleaned.strip():
+            out.append(cleaned.strip())
+    return "\n\n".join(out)
+
+
+def _repair_pdf_spacing(text: str) -> str:
+    """Чинит разрывы, которые оставляет извлечение текста из PDF.
+
+    Правим только пробел перед дефисом внутри слова («из -за»,
+    «флеш -накопителе»). Разорванные слова вроде «творчес тво» не
+    трогаем: надёжно отличить их от законной пары слов без словаря
+    нельзя, а ложная склейка портит текст сильнее, чем редкий разрыв.
+    Висячий дефис в перечислении («теле - и радиопередачи») законен и
+    остаётся на месте.
+    """
+    return re.sub(r"(?<=[а-яёa-z0-9]) +-(?=[а-яёa-z0-9])", "-", text,
+                  flags=re.IGNORECASE)
+
+
 async def add_document(
     session: AsyncSession,
     *,
@@ -211,6 +280,14 @@ async def add_document(
     user_id: str | None = None,
 ) -> StoredDocument:
     """Сохраняет документ и его фрагменты."""
+    text = _repair_pdf_spacing(text)
+
+    # Образцы стиля приходят из PDF со статьями, где к тексту
+    # примешаны комментарии рецензента («Добавлено примечание ...»).
+    # В образец манеры письма они попасть не должны: это чужая правка,
+    # а не авторский текст.
+    if kind == KIND_STYLE:
+        text = _prepare_style_text(text)
     existing = await session.scalar(
         select(UserDocument).where(
             UserDocument.owner_key == owner_key,
@@ -320,7 +397,14 @@ async def get_index(session: AsyncSession, *, owner_key: str) -> SearchIndex:
     rows = (await session.execute(
         select(UserDocumentChunk, UserDocument)
         .join(UserDocument, UserDocument.id == UserDocumentChunk.document_id)
-        .where(UserDocumentChunk.owner_key == owner_key)
+        .where(
+            UserDocumentChunk.owner_key == owner_key,
+            # Образцы стиля из тематического поиска исключены: статьи
+            # про авторское право иначе всплывали бы в работе про
+            # коллизии — по совпадению общих юридических слов. У них
+            # другая роль и другой путь в задание модели.
+            UserDocument.kind != KIND_STYLE,
+        )
         .order_by(UserDocumentChunk.position)
     )).all()
 
@@ -337,6 +421,48 @@ async def get_index(session: AsyncSession, *, owner_key: str) -> SearchIndex:
     ])
     _INDEX_CACHE[owner_key] = index
     return index
+
+
+async def get_style_samples(session: AsyncSession, *, owner_key: str,
+                            limit: int = 3,
+                            max_chars: int = 1100) -> list[str]:
+    """Отрывки авторского текста как образец манеры письма.
+
+    Берём не по теме раздела, а равномерно по всему документу: манера
+    видна в любом абзаце, а подбор «по смыслу» привёл бы к тому, что
+    в работу про коллизии попадают именно те статьи, где у автора
+    случайно совпала лексика, — то есть к заимствованию содержания.
+
+    Короткие и слишком длинные куски отбрасываем: по трём строкам
+    манеру не воспроизвести, а на длинных модель начинает копировать
+    предмет статьи вместо способа изложения.
+    """
+    rows = (await session.execute(
+        select(UserDocumentChunk.text)
+        .join(UserDocument, UserDocument.id == UserDocumentChunk.document_id)
+        .where(
+            UserDocumentChunk.owner_key == owner_key,
+            UserDocument.kind == KIND_STYLE,
+        )
+        .order_by(UserDocumentChunk.position)
+    )).all()
+
+    chunks = [r[0] for r in rows
+              if 300 <= len(r[0]) <= max_chars and not _is_promo(r[0])]
+    if not chunks:
+        # Ничего подходящего по длине — берём что есть, обрезав.
+        chunks = [r[0][:max_chars] for r in rows
+                  if len(r[0]) >= 200 and not _is_promo(r[0])]
+    if not chunks:
+        return []
+
+    if len(chunks) <= limit:
+        return chunks
+
+    # Равномерно по документу: начало, середина, конец. Подряд идущие
+    # куски дали бы одну тему и одну интонацию.
+    step = len(chunks) / limit
+    return [chunks[min(int(i * step), len(chunks) - 1)] for i in range(limit)]
 
 
 async def search_documents(session: AsyncSession, *, owner_key: str,

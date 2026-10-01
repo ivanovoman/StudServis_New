@@ -49,6 +49,30 @@ const MATERIAL = `Конспект по теории коллизионного 
 Times New Roman, кегль 12.
 `;
 
+// Образец авторской манеры: короткие фразы, примеры, и рекламный
+// хвост, который не должен попасть в курсовую.
+const STYLE_SAMPLE = `Защита авторских прав
+
+Авторские права возникают сразу после создания произведения. Регистрация
+не нужна. Поэтому многие нарушают их, сами того не замечая. Например,
+берут чужое фото из интернета для своего сайта и считают это нормой.
+
+Как фиксировать нарушение
+
+Сначала стоит зафиксировать нарушение. Подойдёт нотариальный осмотр
+страницы. Он стоит денег, но без него суд может не поверить. Срок тут
+важен: страницу удалят, и доказывать будет нечего.
+
+Наши специалисты подготовят заявление в суд и доведут дело до решения.
+Обращайтесь за бесплатной консультацией.
+
+Способы защиты
+
+Закон даёт выбор. Можно требовать убытки, а можно компенсацию.
+Компенсация проще: размер убытков доказывать не нужно. Суд определит
+сумму сам, в пределах от десяти тысяч до пяти миллионов рублей.
+`;
+
 async function api(path, opts = {}) {
   const headers = Object.assign({ 'X-Owner-Key': OWNER }, opts.headers || {});
   return globalThis.fetch(BASE + path, Object.assign({}, opts, { headers }));
@@ -91,6 +115,37 @@ async function api(path, opts = {}) {
       `«${query}» → нашёлся нужный фрагмент`);
   }
 
+  console.log('\nОбразец стиля живёт по своим правилам');
+  const styleForm = new FormData();
+  styleForm.append('file', new Blob([STYLE_SAMPLE], { type: 'text/plain' }),
+    'статьи.txt');
+  const upStyle = await api('/api/v1/library/upload?kind='
+    + encodeURIComponent('стиль'), { method: 'POST', body: styleForm });
+  ok(upStyle.ok, `загрузка образца стиля ответила ${upStyle.status}`);
+  const styleDoc = await upStyle.json();
+
+  const styleHits = await api('/api/v1/library/search', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ query: 'защита авторских прав', limit: 5 }),
+  });
+  const styleSearch = await styleHits.json();
+  // Важно не то, что поиск пуст (конспект тоже про право и может
+  // откликнуться), а то, что в выдаче нет образца стиля.
+  const fromStyle = (styleSearch.hits || [])
+    .filter((h) => h.source === 'статьи.txt' || h.kind === 'стиль');
+  ok(fromStyle.length === 0,
+    'образец стиля не попадает в тематический поиск '
+    + `(его кусков в выдаче: ${fromStyle.length}, всего найдено `
+    + `${styleSearch.count})`);
+
+  const samplesRes = await api('/api/v1/library/style?limit=3');
+  const samples = await samplesRes.json();
+  ok(samples.count > 0, `образцов манеры отдано: ${samples.count}`);
+  const joined = samples.samples.join(' ').toLowerCase();
+  ok(!/обращайтесь|наши специалисты|мы подготовим/.test(joined),
+    'рекламные куски в образец не попали');
+
   console.log('\nЧужие материалы не видны');
   const alien = await globalThis.fetch(BASE + '/api/v1/library', {
     headers: { 'X-Owner-Key': 'someone-else-key-9999' },
@@ -129,6 +184,7 @@ async function api(path, opts = {}) {
   if (!LIVE) {
     console.log('\nLIVE=0 — живой прогон модели пропущен');
     await api('/api/v1/library/' + doc.id, { method: 'DELETE' });
+    await api('/api/v1/library/' + styleDoc.id, { method: 'DELETE' });
     return;
   }
 
@@ -190,6 +246,7 @@ async function api(path, opts = {}) {
   console.log('\nУборка');
   const del = await api('/api/v1/library/' + doc.id, { method: 'DELETE' });
   ok(del.ok, 'материал удалён');
+  await api('/api/v1/library/' + styleDoc.id, { method: 'DELETE' });
   const after = await (await api('/api/v1/library')).json();
   ok(after.count === 0, 'библиотека пуста');
 
