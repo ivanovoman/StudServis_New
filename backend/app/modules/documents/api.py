@@ -13,11 +13,15 @@ from app.modules.documents.gost_engine import (
     generate_fragment_docx,
     generate_full_docx,
 )
+from app.modules.documents.pptx_engine import Slide, build_presentation
 
 router = APIRouter(prefix="/documents", tags=["documents"])
 
 DOCX_MIME = (
     "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+)
+PPTX_MIME = (
+    "application/vnd.openxmlformats-officedocument.presentationml.presentation"
 )
 
 
@@ -76,7 +80,8 @@ class FullRequest(BaseModel):
         return value
 
 
-def _docx_response(data: bytes, filename: str) -> Response:
+def _file_response(data: bytes, filename: str, *, ext: str,
+                   mime: str) -> Response:
     """Отдаёт файл с корректным именем.
 
     Кириллица в имени требует RFC 5987 (filename*), иначе Word получит
@@ -85,14 +90,18 @@ def _docx_response(data: bytes, filename: str) -> Response:
     safe = re.sub(r'[\\/:*?"<>|]', "_", filename).strip() or "document"
     return Response(
         content=data,
-        media_type=DOCX_MIME,
+        media_type=mime,
         headers={
             "Content-Disposition": (
-                f"attachment; filename=document.docx; "
-                f"filename*=UTF-8''{quote(safe)}.docx"
+                f"attachment; filename=document.{ext}; "
+                f"filename*=UTF-8''{quote(safe)}.{ext}"
             )
         },
     )
+
+
+def _docx_response(data: bytes, filename: str) -> Response:
+    return _file_response(data, filename, ext="docx", mime=DOCX_MIME)
 
 
 @router.post("/export/fragment", summary="DOCX одного фрагмента")
@@ -127,3 +136,59 @@ async def export_full(payload: FullRequest) -> Response:
         margin_right_mm=payload.margin_right_mm,
     )
     return _docx_response(data, payload.topic or "Курсовая работа")
+
+
+class SlideIn(BaseModel):
+    title: str = ""
+    bullets: list[str] = Field(default_factory=list)
+    table: list[list[str]] = Field(default_factory=list)
+    note: str = ""
+    levels: list[int] = Field(default_factory=list)
+
+
+class SlidesRequest(BaseModel):
+    """Презентация к защите.
+
+    Реквизиты титульного листа приходят отдельными полями, а не в
+    составе слайдов: модель охотно выдумывает ФИО руководителя, и на
+    защите это замечают сразу.
+    """
+
+    slides: list[SlideIn] = Field(default_factory=list)
+    topic: str = ""
+    university: str = ""
+    author: str = ""
+    supervisor: str = ""
+    year: str = ""
+
+    @field_validator("slides")
+    @classmethod
+    def _non_empty(cls, value):
+        if not value:
+            raise ValueError("Нужен хотя бы один слайд")
+        return value
+
+
+@router.post("/export/slides", summary="PPTX презентации к защите")
+async def export_slides(payload: SlidesRequest) -> Response:
+    slides = [
+        Slide(
+            title=s.title,
+            bullets=[b for b in s.bullets if b.strip()],
+            table=[row for row in s.table if any(c.strip() for c in row)],
+            note=s.note,
+            levels=s.levels,
+        )
+        for s in payload.slides
+    ]
+    data = build_presentation(
+        slides,
+        topic=payload.topic,
+        university=payload.university,
+        author=payload.author,
+        supervisor=payload.supervisor,
+        year=payload.year,
+    )
+    return _file_response(
+        data, payload.topic or "Презентация", ext="pptx", mime=PPTX_MIME,
+    )

@@ -11,7 +11,8 @@
     "check:modern": "node tools/check-modern.js",
     "check:entry": "node tools/check-entry.js",
     "check:account": "node tools/check-account.js",
-    "check:workbench": "node tools/check-workbench.js"
+    "check:workbench": "node tools/check-workbench.js",
+    "check:slides": "node tools/check-slides.js"
   },
   "engines": {
     "node": ">=18"

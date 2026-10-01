@@ -51,7 +51,7 @@ function ok(cond, text) {
 
   console.log('\nКарточки меню');
   const cards = [...doc.querySelectorAll('.card')];
-  ok(cards.length === 8, `карточек на экране: ${cards.length} (ждём 8)`);
+  ok(cards.length === 9, `карточек на экране: ${cards.length} (ждём 9)`);
   const muted = cards.filter((c) => c.className.includes('muted'));
   ok(muted.length === 0, `неактивных карточек: ${muted.length} (ждём 0)`);
   const soon = [...doc.querySelectorAll('.tag.soon')];

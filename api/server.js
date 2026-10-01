@@ -5,6 +5,7 @@ const path = require('path');
 const { STEP_PROMPTS, applyChapters } = require('./prompts');
 const { parseOutline, buildQueue } = require('./outline');
 const { createQueue } = require('./jobqueue');
+const { parseSlides } = require('./slides');
 const { fixHybrids } = require('./textfix');
 const { generateFragmentDocx, generateFullDocx } = require('./docxExport');
 const { resolveProviders, modelsFor } = require('./providers');
@@ -1167,6 +1168,42 @@ async function writeFullPiece(task, ctx, send) {
  * строки. Целиком они не влезут в контекст к середине работы, а для
  * борьбы с повторами достаточно знать, о чём уже сказано.
  */
+/**
+ * Дочитывает потоковый ответ модели до конца и отдаёт готовый текст.
+ *
+ * Поток нужен не везде: там, где наружу уходит целый кусок (раздел,
+ * презентация), прогресс показывается по частям, а не по буквам.
+ */
+async function readWholeAnswer(upstream) {
+  const reader = upstream.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+  let text = '';
+
+  while (true) {
+    const { done: finished, value } = await reader.read();
+    if (finished) break;
+    buffer += decoder.decode(value, { stream: true });
+    const lines = buffer.split('\n');
+    buffer = lines.pop();
+    for (const line of lines) {
+      const t = line.trim();
+      if (!t.startsWith('data:')) continue;
+      const payload = t.slice(5).trim();
+      if (payload === '[DONE]') continue;
+      try {
+        const parsed = JSON.parse(payload);
+        const choice = parsed.choices?.[0];
+        text += choice?.delta?.content || choice?.delta?.reasoning_content || '';
+      } catch { /* keep-alive и прочий мусор */ }
+    }
+  }
+
+  if (!text.trim()) throw new Error('модель вернула пустой ответ');
+  return text.trim();
+}
+
+
 async function writePiece(task, ctx, opts = {}) {
   const { plan, settings, done, sources } = ctx;
   const expand = opts.expand || null;
@@ -1232,35 +1269,7 @@ async function writePiece(task, ctx, opts = {}) {
   messages.push({ role: 'user', content: user });
 
   const { upstream } = await callOpenRouterWithFallback(messages);
-
-  // Ответ читаем целиком: поток здесь не нужен, наружу уходит готовый
-  // кусок, а прогресс показывается по кускам, а не по буквам.
-  const reader = upstream.body.getReader();
-  const decoder = new TextDecoder();
-  let buffer = '';
-  let text = '';
-
-  while (true) {
-    const { done: finished, value } = await reader.read();
-    if (finished) break;
-    buffer += decoder.decode(value, { stream: true });
-    const lines = buffer.split('\n');
-    buffer = lines.pop();
-    for (const line of lines) {
-      const t = line.trim();
-      if (!t.startsWith('data:')) continue;
-      const payload = t.slice(5).trim();
-      if (payload === '[DONE]') continue;
-      try {
-        const parsed = JSON.parse(payload);
-        const choice = parsed.choices?.[0];
-        text += choice?.delta?.content || choice?.delta?.reasoning_content || '';
-      } catch { /* keep-alive и прочий мусор */ }
-    }
-  }
-
-  if (!text.trim()) throw new Error('модель вернула пустой ответ');
-  return text.trim();
+  return readWholeAnswer(upstream);
 }
 
 
@@ -1583,6 +1592,122 @@ app.post('/api/export-docx-full', async (req, res) => {
   } catch (err) {
     console.error('Export full docx error:', err);
     res.status(500).json({ error: 'Не удалось собрать файл: ' + err.message });
+  }
+});
+
+/**
+ * Презентация к защите: модель пишет слайды, Python собирает .pptx.
+ *
+ * Генерация и сборка файла разделены намеренно. Текст слайдов человек
+ * почти всегда правит — формулировки на экране дело вкуса кафедры, —
+ * и перегенерировать всю презентацию ради одной строки глупо. Поэтому
+ * сначала отдаём разобранную структуру, а файл собираем отдельным
+ * запросом из того, что пользователь утвердил.
+ */
+app.post('/api/slides', async (req, res) => {
+  const { work, settings } = req.body || {};
+  const text = String(work || '').trim();
+  if (text.length < 500) {
+    return res.status(400).json({
+      error: 'Для презентации нужен текст работы — хотя бы введение и '
+           + 'один раздел.',
+    });
+  }
+
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Connection', 'keep-alive');
+  const send = (obj) => res.write(`data: ${JSON.stringify(obj)}\n\n`);
+
+  let releaseRaw;
+  try {
+    releaseRaw = await heavyJobs.acquire((place, total) => {
+      send({
+        queued: {
+          place,
+          total,
+          message: place === 1
+            ? 'Впереди одна работа — начнём, как только она закончится.'
+            : `Вы ${place}-й в очереди из ${total}.`,
+        },
+      });
+    });
+  } catch (e) {
+    send({ error: e.message });
+    res.write('data: [DONE]\n\n');
+    return res.end();
+  }
+
+  let released = false;
+  const releaseJob = () => {
+    if (released) return;
+    released = true;
+    releaseRaw();
+  };
+  res.on('close', releaseJob);
+
+  try {
+    const prompt = applyChapters(
+      STEP_PROMPTS.slides, settings && settings.chapters);
+    const { upstream } = await callOpenRouterWithFallback([
+      { role: 'system', content: prompt },
+      { role: 'user', content: text.slice(0, 40000) },
+    ]);
+    const raw = await readWholeAnswer(upstream);
+
+    const parsed = parseSlides(raw);
+    if (!parsed.count) {
+      send({ error: 'Модель вернула ответ без слайдов. Попробуйте ещё раз.' });
+    } else {
+      send({ slides: parsed.slides, warnings: parsed.warnings,
+             count: parsed.count });
+    }
+  } catch (e) {
+    send({ error: e.message });
+  } finally {
+    releaseJob();
+  }
+
+  res.write('data: [DONE]\n\n');
+  res.end();
+});
+
+/** Сборка .pptx из утверждённых слайдов. */
+app.post('/api/export-pptx', async (req, res) => {
+  try {
+    const { slides, topic, university, author, supervisor, year } = req.body || {};
+    if (!Array.isArray(slides) || !slides.length) {
+      return res.status(400).json({ error: 'Нет слайдов для сборки' });
+    }
+
+    const r = await fetch(`${PY_BACKEND}/api/v1/documents/export/slides`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        slides, topic: topic || '', university: university || '',
+        author: author || '', supervisor: supervisor || '',
+        year: year || String(new Date().getFullYear()),
+      }),
+    });
+    if (!r.ok) {
+      const detail = await r.text();
+      throw new Error(`бэкенд документов ответил ${r.status}: ${detail.slice(0, 200)}`);
+    }
+
+    const buffer = Buffer.from(await r.arrayBuffer());
+    const filename = String(topic || 'Презентация')
+      .slice(0, 60).replace(/[\\/:*?"<>|]/g, '_');
+    res.setHeader('Content-Type',
+      'application/vnd.openxmlformats-officedocument.presentationml.presentation');
+    res.setHeader('Content-Disposition',
+      `attachment; filename="slides.pptx"; `
+      + `filename*=UTF-8''${encodeURIComponent(filename)}.pptx`);
+    res.send(buffer);
+  } catch (err) {
+    console.error('Export pptx error:', err);
+    res.status(500).json({
+      error: 'Не удалось собрать презентацию: ' + err.message,
+    });
   }
 });
 

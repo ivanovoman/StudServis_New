@@ -17,7 +17,7 @@
     // Рабочим пункт делает любой из трёх видов действия. Проверка
     // только на cfg.step гасила уже готовые сборку и инструменты:
     // бэкенд их умел, а карточка молчала «Скоро».
-    var ready = !!(cfg.step || cfg.tool || cfg.assemble);
+    var ready = !!(cfg.step || cfg.tool || cfg.assemble || cfg.slides);
 
     var card = document.createElement('button');
     // Класс 'muted' только приглушает вид: карточка остаётся рабочей
@@ -46,6 +46,7 @@
 
     card.onclick = function () {
       if (cfg.assemble) window.ModernSheets.openWriting();
+      else if (cfg.slides) window.ModernSlides.open();
       else if (cfg.tool) window.ModernSheets.openTool(cfg);
       else openSheet(num);
     };

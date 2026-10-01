@@ -52,6 +52,10 @@
          short: 'Доклад на 7 минут и вопросы комиссии с ответами',
          docTitle: 'Речь для защиты', needsSettings: true,
          placeholder: 'Вставьте текст готовой работы' },
+
+    9: { slides: true, title: 'Презентация к защите',
+         short: 'Слайды с правкой и выгрузкой в PowerPoint',
+         needsSettings: true },
   };
 
 
