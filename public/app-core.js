@@ -34,8 +34,8 @@
          docTitle: 'Введение', needsSettings: true,
          placeholder: 'Вставьте план работы' },
 
-    4: { assemble: true, title: 'Собрать курсовую',
-         short: 'Полная сборка работы по готовому плану',
+    4: { assemble: true, title: 'Написать работу',
+         short: 'По разделам с правкой или сборка целиком',
          needsSettings: true },
 
     5: { tool: 'sources', title: 'Подобрать источники',

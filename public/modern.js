@@ -45,7 +45,7 @@
     card.appendChild(p);
 
     card.onclick = function () {
-      if (cfg.assemble) window.ModernSheets.openAssemble();
+      if (cfg.assemble) window.ModernSheets.openWriting();
       else if (cfg.tool) window.ModernSheets.openTool(cfg);
       else openSheet(num);
     };

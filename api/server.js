@@ -1003,7 +1003,9 @@ function createWorkStorage(ownerKey, settings, plan) {
           number: task.number || null,
           heading: task.heading || task.title || '',
           text,
-          position: index,
+          // null — «добавь в конец»: так части не затирают друг друга,
+          // когда порядок заранее неизвестен.
+          position: Number.isInteger(index) ? index : null,
         });
       } catch (e) {
         this.failedOnce = true;
@@ -1210,6 +1212,138 @@ async function writePiece(task, ctx, opts = {}) {
   if (!text.trim()) throw new Error('модель вернула пустой ответ');
   return text.trim();
 }
+
+
+/**
+ * Разбор плана в список частей — без обращения к модели.
+ *
+ * Нужен для пораздельной работы: интерфейс показывает структуру и даёт
+ * писать по одному пункту, а не всю работу разом. Раньше план жил на
+ * экране простынёй текста, и управлять им было нечем.
+ */
+app.post('/api/outline', (req, res) => {
+  const { plan } = req.body || {};
+  if (!plan || String(plan).trim().length < 100) {
+    return res.status(400).json({
+      error: 'Нужен план работы. Сначала выполните пункт 2.',
+    });
+  }
+
+  const outline = parseOutline(plan);
+  const queue = buildQueue(outline);
+  res.json({
+    chapters: outline.chapters,
+    warnings: outline.warnings,
+    queue,
+    total: queue.length,
+    topic: topicFromPlan(plan),
+  });
+});
+
+/**
+ * Пишет одну часть работы: введение, раздел или заключение.
+ *
+ * Отличается от /api/assemble тем, что человек сам выбирает, что и
+ * когда писать, видит результат и решает, принять его или переписать.
+ * Сборка целиком остаётся для тех, кому нужен черновик разом.
+ *
+ * Контекст уже написанного приходит с клиента: модель не должна
+ * повторять мысли из соседних разделов.
+ */
+app.post('/api/section', async (req, res) => {
+  const { plan, settings, task, written, workId, ownerKey } = req.body || {};
+
+  if (!plan || String(plan).trim().length < 100) {
+    return res.status(400).json({ error: 'Нужен план работы.' });
+  }
+  if (!task || !task.kind) {
+    return res.status(400).json({ error: 'Не указано, какую часть писать.' });
+  }
+
+  const access = await spendWork(req.headers.authorization);
+  if (!access.allowed) {
+    return res.status(402).json({
+      error: access.message || 'Нужна оплата.',
+      reason: access.reason,
+    });
+  }
+
+  res.writeHead(200, {
+    'Content-Type': 'text/event-stream; charset=utf-8',
+    'Cache-Control': 'no-cache',
+    Connection: 'keep-alive',
+  });
+  const send = (obj) => res.write(`data: ${JSON.stringify(obj)}\n\n`);
+
+  try {
+    // Публикации ищем по теме работы: ссылаться нужно и в одиночном
+    // разделе, иначе текст окажется без опоры на литературу.
+    const topic = (settings && settings.topic) || topicFromPlan(plan);
+    const found = await fetchSources(topic);
+    const sources = found && found.sources ? found.sources : [];
+    if (sources.length) send({ sources });
+
+    // Уже написанное приходит с клиента в том же виде, что копит
+    // сборка: {task, text}. Длину ограничиваем — в контекст модели
+    // всё равно уйдёт только выжимка.
+    const done = (Array.isArray(written) ? written : [])
+      .slice(-12)
+      .map((w) => ({
+        task: { heading: w.heading || '', title: w.heading || '' },
+        text: String(w.text || '').slice(0, 4000),
+      }));
+
+    const raw = await writeFullPiece(task, { plan, settings, done, sources }, send);
+    const { text, fixed } = fixHybrids(raw);
+
+    const legal = await checkLegalRefs(text);
+    if (legal && (legal.wrong.length || legal.unclear.length)) {
+      send({
+        legal: {
+          heading: task.heading || task.title,
+          checked: legal.checked,
+          wrong: legal.wrong,
+          unclear: legal.unclear,
+        },
+      });
+    }
+
+    // Сохраняем сразу: человек может закрыть вкладку, написав три
+    // раздела из восьми, и они не должны пропасть.
+    let savedId = workId || null;
+    if (ownerKey) {
+      const storage = createWorkStorage(ownerKey, settings, plan);
+      if (workId) storage.id = workId;
+      else await storage.start();
+
+      // Позиция — это место части в плане. Она же делает перезапись
+      // раздела заменой, а не дублем: написал заново — прежний вариант
+      // ушёл. Без неё все части ложились на нулевую позицию и
+      // затирали друг друга.
+      const position = Number.isInteger(task.position) ? task.position : null;
+      await storage.savePiece(task, text, position);
+      savedId = storage.id;
+    }
+
+    send({
+      piece: {
+        kind: task.kind,
+        number: task.number || null,
+        heading: task.heading || task.title,
+        text,
+        chars: text.replace(/\s/g, '').length,
+        fixed: fixed.length ? fixed : undefined,
+      },
+      workId: savedId,
+    });
+  } catch (e) {
+    send({ error: e.message });
+    if (access.reason === 'spent') await refundWork(req.headers.authorization);
+  }
+
+  res.write('data: [DONE]\n\n');
+  res.end();
+});
 
 app.get('/api/health', (req, res) => {
   // Показываем, какие поставщики реально настроены — это первое,

@@ -380,6 +380,45 @@
       .catch(function (e) { fail(out, done, e); });
   }
 
+
+  /**
+   * Развилка пункта 4: писать по разделам или собрать всё разом.
+   *
+   * Сборка целиком быстрее на вид — одна кнопка и три минуты, — но
+   * результат человек видит уже готовым и правит вслепую. Работа по
+   * разделам дольше, зато каждый кусок можно прочитать и переписать.
+   * Выбор оставляем за пользователем, умолчание — по разделам.
+   */
+  function openWriting() {
+    var shell = window.ModernUI.openShell('Написать работу');
+    var body = shell.body;
+
+    body.appendChild(el('div', 'hint',
+      'Два способа. Выберите тот, что подходит сейчас.'));
+
+    var byParts = el('div', 'piece');
+    byParts.appendChild(el('div', 'ftitle', 'По разделам — рекомендуем'));
+    byParts.appendChild(el('div', 'hint',
+      'План превращается в список. Пишете по одному пункту, читаете, '
+    + 'правите руками или переписываете заново. Каждая часть '
+    + 'сохраняется сразу.'));
+    var b1 = el('button', 'btn', 'Открыть по разделам');
+    byParts.appendChild(b1);
+    body.appendChild(byParts);
+
+    var whole = el('div', 'piece');
+    whole.appendChild(el('div', 'ftitle', 'Всё разом'));
+    whole.appendChild(el('div', 'hint',
+      'Черновик целиком примерно за три минуты. Удобно, когда нужен '
+    + 'общий каркас, а править вы будете уже в Word.'));
+    var b2 = el('button', 'btn ghost', 'Собрать целиком');
+    whole.appendChild(b2);
+    body.appendChild(whole);
+
+    b1.onclick = function () { window.ModernWorkbench.open(); };
+    b2.onclick = function () { openAssemble(); };
+  }
+
   // ----------------------------------------------- 4. сборка работы
 
   /**
@@ -541,5 +580,6 @@
     openSettings: openSettings,
     openTool: openTool,
     openAssemble: openAssemble,
+    openWriting: openWriting,
   };
 })();

@@ -10,7 +10,8 @@
     "check:gigachat": "node tools/check-gigachat.js",
     "check:modern": "node tools/check-modern.js",
     "check:entry": "node tools/check-entry.js",
-    "check:account": "node tools/check-account.js"
+    "check:account": "node tools/check-account.js",
+    "check:workbench": "node tools/check-workbench.js"
   },
   "engines": {
     "node": ">=18"

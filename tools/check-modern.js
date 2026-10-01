@@ -60,7 +60,6 @@ function ok(cond, text) {
   console.log('\nОкна открываются');
   const checks = [
     [3, 'Введение', 'textarea'],
-    [4, 'Собрать курсовую', '.bar-wrap'],
     [5, 'Подобрать источники', 'textarea'],
     [6, 'Оформить по ГОСТ', 'textarea'],
     [7, 'Проверить на ИИ', 'textarea'],
@@ -75,6 +74,20 @@ function ok(cond, text) {
     const x = sheet && sheet.querySelector('.x');
     if (x) x.dispatchEvent(new window.MouseEvent('click', { bubbles: true }));
   }
+
+  console.log('\nПункт 4: развилка способов написания');
+  // Пункт 4 больше не открывает сборку сразу: сначала выбор между
+  // работой по разделам и сборкой целиком.
+  cards[3].dispatchEvent(new window.MouseEvent('click', { bubbles: true }));
+  let sheet4 = doc.querySelector('.sheet');
+  ok(sheet4.textContent.includes('По разделам'), 'предложена работа по разделам');
+  [...sheet4.querySelectorAll('button')]
+    .find((b) => b.textContent === 'Собрать целиком')
+    .dispatchEvent(new window.MouseEvent('click', { bubbles: true }));
+  await new Promise((r) => setTimeout(r, 150));
+  sheet4 = doc.querySelector('.sheet');
+  ok(!!sheet4.querySelector('.bar-wrap'), 'окно сборки целиком открылось');
+  sheet4.querySelector('.x').dispatchEvent(new window.MouseEvent('click', { bubbles: true }));
 
   console.log('\nНастройки');
   doc.getElementById('btn-settings')
@@ -195,6 +208,11 @@ function ok(cond, text) {
   };
 
   cards[3].dispatchEvent(new window.MouseEvent('click', { bubbles: true }));
+  sheet = doc.querySelector('.sheet');
+  [...sheet.querySelectorAll('button')]
+    .find((b) => b.textContent === 'Собрать целиком')
+    .dispatchEvent(new window.MouseEvent('click', { bubbles: true }));
+  await new Promise((r) => setTimeout(r, 150));
   sheet = doc.querySelector('.sheet');
   sheet.querySelector('textarea').value = 'Глава 1. Понятие\n1.1 Понятие\n1.2 Практика';
   [...sheet.querySelectorAll('button')]
