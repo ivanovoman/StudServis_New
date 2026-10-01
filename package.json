@@ -12,7 +12,8 @@
     "check:entry": "node tools/check-entry.js",
     "check:account": "node tools/check-account.js",
     "check:workbench": "node tools/check-workbench.js",
-    "check:slides": "node tools/check-slides.js"
+    "check:slides": "node tools/check-slides.js",
+    "check:library": "node tools/check-library.js"
   },
   "engines": {
     "node": ">=18"

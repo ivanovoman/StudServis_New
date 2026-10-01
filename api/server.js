@@ -6,7 +6,7 @@ const { STEP_PROMPTS, applyChapters } = require('./prompts');
 const { parseOutline, buildQueue } = require('./outline');
 const { createQueue } = require('./jobqueue');
 const { parseSlides } = require('./slides');
-const { fixHybrids } = require('./textfix');
+const { fixHybrids, stripLibraryMarkers } = require('./textfix');
 const { generateFragmentDocx, generateFullDocx } = require('./docxExport');
 const { resolveProviders, modelsFor } = require('./providers');
 
@@ -887,12 +887,16 @@ app.post('/api/assemble', async (req, res) => {
     send({ progress: { index: i + 1, total: queue.length, title: task.heading || task.title } });
 
     try {
-      const raw = await writeFullPiece(task, { plan, settings, done, sources }, send);
+      const raw = await writeFullPiece(task, { plan, settings, done, sources, ownerKey }, send);
 
       // Модель изредка мешает латиницу с кириллицей внутри слова
       // («kompetенции»). В готовой работе это брак, а глазами такое
       // почти не видно - чиним и показываем, что именно поправили.
-      const { text, fixed } = fixHybrids(raw);
+      const { text: unmarked, removed: markers } = stripLibraryMarkers(raw);
+      if (markers) {
+        console.log(`Убрано служебных пометок материалов: ${markers}`);
+      }
+      const { text, fixed } = fixHybrids(unmarked);
       done.push({ task, text });
       await storage.savePiece(task, text, i);
 
@@ -1174,6 +1178,64 @@ async function writeFullPiece(task, ctx, send) {
  * Поток нужен не везде: там, где наружу уходит целый кусок (раздел,
  * презентация), прогресс показывается по частям, а не по буквам.
  */
+/**
+ * Ищет в библиотеке пользователя фрагменты, относящиеся к разделу.
+ *
+ * Студент загружает методичку, конспект, сборник практики — всё то,
+ * чего модель не знает. Научный руководитель узнаёт собственные
+ * формулировки и спрашивает, почему их нет в работе.
+ *
+ * Подмешиваем не весь документ (он не влезет в запрос), а несколько
+ * фрагментов, отвечающих на тему раздела. Поиск лексический, без
+ * нейросетей: на юридических текстах он оказался точнее эмбеддингов
+ * (замер в tools/bench-search.py).
+ *
+ * Библиотека необязательна: если её нет или бэкенд не поднят, раздел
+ * пишется как прежде. Ронять генерацию из-за этого нельзя.
+ */
+async function fetchLibrary(ownerKey, query, limit = 4) {
+  if (!ownerKey || !query) return [];
+  try {
+    const r = await fetch(`${PY_BACKEND}/api/v1/library/search`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Owner-Key': ownerKey,
+      },
+      body: JSON.stringify({ query: String(query).slice(0, 500), limit }),
+    });
+    if (!r.ok) return [];
+    const data = await r.json();
+    return Array.isArray(data.hits) ? data.hits : [];
+  } catch (e) {
+    console.error('Библиотека недоступна:', e.message);
+    return [];
+  }
+}
+
+/** Блок с материалами пользователя для задания модели. */
+function libraryBlock(hits) {
+  if (!hits || !hits.length) return '';
+
+  const parts = hits.map((h, i) => {
+    const where = h.source ? ` (${h.source})` : '';
+    // Фрагмент обрезаем: четыре куска по две тысячи знаков съедят
+    // place, отведённое под сам текст раздела.
+    return `[М${i + 1}]${where}\n${String(h.text).slice(0, 1200)}`;
+  });
+
+  return 'МАТЕРИАЛЫ, ЗАГРУЖЕННЫЕ АВТОРОМ РАБОТЫ\n\n'
+    + 'Это методички, конспекты и документы, которые принёс сам автор. '
+    + 'Они важнее общих знаний: если фрагмент отвечает на вопрос раздела, '
+    + 'опирайся на него и используй его терминологию.\n\n'
+    + 'Требования к оформлению из методички выполняй буквально.\n\n'
+    + 'Переписывать фрагменты дословно не нужно — это материал для '
+    + 'опоры, а не текст работы. Ссылок вида [М1] в тексте не ставь: '
+    + 'это служебные пометки, в готовой работе их быть не должно.\n\n'
+    + parts.join('\n\n');
+}
+
+
 async function readWholeAnswer(upstream) {
   const reader = upstream.body.getReader();
   const decoder = new TextDecoder();
@@ -1205,7 +1267,7 @@ async function readWholeAnswer(upstream) {
 
 
 async function writePiece(task, ctx, opts = {}) {
-  const { plan, settings, done, sources } = ctx;
+  const { plan, settings, done, sources, ownerKey } = ctx;
   const expand = opts.expand || null;
 
   const stepName = expand
@@ -1246,6 +1308,14 @@ async function writePiece(task, ctx, opts = {}) {
   // девять разделов остались вообще без опоры на литературу.
   const srcBlock = sourcesBlock(sources);
   if (srcBlock) messages.push({ role: 'system', content: srcBlock });
+
+  // Материалы автора. Ищем по теме раздела: именно она определяет,
+  // какой кусок методички или конспекта сейчас нужен.
+  const libQuery = [task.heading || task.title, task.brief]
+    .filter(Boolean).join('. ');
+  const libHits = await fetchLibrary(ownerKey, libQuery);
+  const libBlock = libraryBlock(libHits);
+  if (libBlock) messages.push({ role: 'system', content: libBlock });
 
   let user;
   if (expand) {
@@ -1381,8 +1451,12 @@ app.post('/api/section', async (req, res) => {
         text: String(w.text || '').slice(0, 4000),
       }));
 
-    const raw = await writeFullPiece(task, { plan, settings, done, sources }, send);
-    const { text, fixed } = fixHybrids(raw);
+    const raw = await writeFullPiece(task, { plan, settings, done, sources, ownerKey }, send);
+    const { text: unmarked, removed: markers } = stripLibraryMarkers(raw);
+    if (markers) {
+      console.log(`Убрано служебных пометок материалов: ${markers}`);
+    }
+    const { text, fixed } = fixHybrids(unmarked);
 
     const legal = await checkLegalRefs(text);
     if (legal && (legal.wrong.length || legal.unclear.length)) {

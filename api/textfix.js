@@ -73,4 +73,28 @@ function fixHybrids(text) {
   return { text: out, fixed };
 }
 
-module.exports = { fixHybrids };
+// Служебные пометки материалов автора: [М1], [М 2], [M3] латиницей.
+// Модель просят их не ставить, но она ставит — запрет в промпте
+// работает через раз, а пометка в готовой работе выглядит как брак.
+// Поэтому чистим кодом: на текст, который увидит преподаватель,
+// полагаться на дисциплину модели нельзя.
+const LIB_MARKER_RE = /\s*\[\s*[МM]\s*\d+\s*\]/g;
+
+/**
+ * Убирает служебные пометки материалов из готового текста.
+ *
+ * @param {string} text
+ * @returns {{text: string, removed: number}}
+ */
+function stripLibraryMarkers(text) {
+  const src = String(text || '');
+  const found = src.match(LIB_MARKER_RE);
+  if (!found) return { text: src, removed: 0 };
+
+  // Пробел перед пометкой съедается вместе с ней, иначе остаётся
+  // двойной; знак препинания после — сохраняется.
+  const out = src.replace(LIB_MARKER_RE, '').replace(/ {2,}/g, ' ');
+  return { text: out, removed: found.length };
+}
+
+module.exports = { fixHybrids, stripLibraryMarkers };

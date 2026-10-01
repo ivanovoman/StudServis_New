@@ -126,6 +126,7 @@ async def init_models() -> None:
     from app.modules.auth import models as auth_models  # noqa: F401
     from app.modules.payments import models as payment_models  # noqa: F401
     from app.modules.projects import works  # noqa: F401
+    from app.modules.rag_service import library  # noqa: F401
 
     engine = get_engine()
     async with engine.begin() as conn:

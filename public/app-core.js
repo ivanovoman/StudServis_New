@@ -56,6 +56,10 @@
     9: { slides: true, title: 'Презентация к защите',
          short: 'Слайды с правкой и выгрузкой в PowerPoint',
          needsSettings: true },
+
+    10: { library: true, title: 'Мои материалы',
+          short: 'Методички и конспекты, на которые сервис будет опираться',
+          free: true },
   };
 
 
