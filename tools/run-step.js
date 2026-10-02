@@ -9,9 +9,13 @@
  * мусор в тексте.
  *
  * Запуск:
- *   node tools/run-step.js --step 1 --input "Коллизии в праве"
- *   node tools/run-step.js --step 2 --input-file /tmp/analysis.txt \
+ *   node tools/run-step.js --step analysis --input "Коллизии в праве"
+ *   node tools/run-step.js --step plan --input-file /tmp/analysis.txt \
  *        --settings '{"chapters":"2"}' --out /tmp/plan.txt
+ *
+ * Шаг называется словом, а не номером меню: analysis, plan,
+ * introduction, speech. Номер сервер не понимает и отвечает
+ * «Неизвестный шаг протокола».
  */
 
 const fs = require('fs');
@@ -36,6 +40,8 @@ const history = arg('history-file')
 
 if (!step || !input) {
   console.error('Нужны --step и --input (или --input-file)');
+  console.error('Шаг — слово, а не номер меню: analysis, plan, '
+    + 'introduction, speech.');
   process.exit(2);
 }
 
