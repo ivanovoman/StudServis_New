@@ -1,0 +1,29 @@
+{
+  "name": "studservis",
+  "version": "0.1.0",
+  "private": true,
+  "description": "СЕРВИС СТУДРАБОТ - помощник студента для создания курсовых работ",
+  "main": "api/server.js",
+  "scripts": {
+    "start": "node api/start.js",
+    "dev": "node --watch api/start.js",
+    "check:gigachat": "node tools/check-gigachat.js",
+    "check:modern": "node tools/check-modern.js",
+    "check:entry": "node tools/check-entry.js",
+    "check:account": "node tools/check-account.js",
+    "check:workbench": "node tools/check-workbench.js",
+    "check:slides": "node tools/check-slides.js",
+    "check:library": "node tools/check-library.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "docx": "^8.5.0",
+    "dotenv": "^16.4.5",
+    "express": "^4.19.2"
+  },
+  "devDependencies": {
+    "jsdom": "^29.1.1"
+  }
+}
