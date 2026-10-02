@@ -49,6 +49,50 @@ const openrouter = {
   },
 };
 
+// ------------------------------------------------------------- Hugging Face
+
+/**
+ * Hugging Face Inference Providers — витрина чужих серверов с общим
+ * ключом. Добавлена ради моделей, которых нет в бесплатном доступе у
+ * OpenRouter: веса там открытые, а хостят их DeepInfra, Together,
+ * Fireworks.
+ *
+ * Чем это НЕ является: бесплатным доступом. Hugging Face берёт ровно
+ * ту же цену, что провайдер, без наценки, и просто пересылает запрос.
+ * Бесплатному аккаунту дают 0,10 доллара кредитов в месяц, PRO —
+ * два доллара. Для сервиса это ничто, для замера хватает: один раздел
+ * курсовой на Inkling Small стоит около 0,008 доллара, то есть
+ * бесплатных кредитов хватает примерно на дюжину разделов в месяц.
+ *
+ * Зачем тогда провайдер в коде: чтобы прогнать модель на живой
+ * нагрузке и решить, стоит ли она денег, не переписывая сервер.
+ *
+ * Токен берётся на huggingface.co/settings/tokens, нужен тип
+ * «Read» и включённое разрешение на инференс.
+ */
+const huggingface = {
+  id: 'huggingface',
+  title: 'Hugging Face',
+  needsKey: 'HF_TOKEN',
+  defaultModels: [
+    // Названия моделей здесь — как в каталоге HF, с заглавными
+    // буквами. Строчный вариант, привычный по OpenRouter, отдаёт 404.
+    'thinkingmachines/Inkling-Small',
+    'thinkingmachines/Inkling',
+  ],
+
+  async stream(model, messages, env) {
+    return fetch('https://router.huggingface.co/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${env.HF_TOKEN}`,
+      },
+      body: JSON.stringify({ model, messages, stream: true }),
+    });
+  },
+};
+
 // ------------------------------------------------------------------ GigaChat
 
 /**
@@ -238,7 +282,7 @@ const custom = {
 
 // ------------------------------------------------------------------- выбор
 
-const PROVIDERS = { openrouter, gigachat, custom };
+const PROVIDERS = { openrouter, huggingface, gigachat, custom };
 
 /**
  * Список провайдеров для попытки, в порядке приоритета.
@@ -272,6 +316,7 @@ function resolveProviders(env) {
 function modelsFor(provider, env) {
   const key = {
     openrouter: 'OPENROUTER_MODELS',
+    huggingface: 'HF_MODELS',
     gigachat: 'GIGACHAT_MODELS',
     custom: 'CUSTOM_MODELS',
   }[provider.id];
