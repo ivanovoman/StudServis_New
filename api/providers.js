@@ -117,6 +117,22 @@ const huggingface = {
  *    стоит, но для локальной разработки приемлемо.
  */
 let gigachatToken = { value: null, expiresAt: 0 };
+
+/**
+ * Запрос токена, который сейчас в полёте.
+ *
+ * Зачем. Кэш токена спасает от повторных запросов только когда вызовы
+ * идут один за другим. Стоит запустить несколько задач одновременно —
+ * например, написать раздел сразу тремя моделями, — и все они видят
+ * пустой кэш, все идут за токеном, и Сбер отвечает «429 Too Many
+ * Requests» на сам запрос токена. Сервис при этом падает целиком, хотя
+ * квота на запросы к модели не тронута.
+ *
+ * Поэтому запрос токена хранится как обещание: первый вызов идёт в
+ * сеть, остальные ждут его результата.
+ */
+let gigachatTokenRequest = null;
+
 let tlsWarned = false;
 
 /**
@@ -190,7 +206,15 @@ const gigachat = {
     if (gigachatToken.value && now < gigachatToken.expiresAt - 60_000) {
       return gigachatToken.value;
     }
+    // Кто-то уже пошёл за токеном — ждём его, второй раз не идём.
+    if (gigachatTokenRequest) return gigachatTokenRequest;
 
+    gigachatTokenRequest = this._requestToken(env)
+      .finally(() => { gigachatTokenRequest = null; });
+    return gigachatTokenRequest;
+  },
+
+  async _requestToken(env) {
     const scope = env.GIGACHAT_SCOPE || 'GIGACHAT_API_PERS';
     const res = await fetch(
       'https://ngw.devices.sberbank.ru:9443/api/v2/oauth', {

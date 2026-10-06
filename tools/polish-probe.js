@@ -30,12 +30,17 @@ if (relaunchWithCA(__filename)) return;
 
 require('dotenv').config();
 const { resolveProviders, modelsFor } = require('../api/providers.js');
+const { extractFacts, lostFacts } = require('../api/facts.js');
 
 function arg(name, def = null) {
   const i = process.argv.indexOf(`--${name}`);
   return i > -1 ? process.argv[i + 1] : def;
 }
 
+// Доля исходного объёма, ниже которой кусок считается усохшим.
+// Девять десятых: небольшое уплотнение при переписи естественно,
+// потеря пятой части — уже недобор по объёму работы.
+const KEEP_SHARE = Number(arg('keep', 0.9));
 const MIN_PIECE = Number(arg('min', 350));
 const MAX_PIECE = Number(arg('max', 500));
 const BASE = arg('base', 'http://localhost:8000');
@@ -143,39 +148,9 @@ const TASK = 'Перепиши фрагмент научной работы в �
   + 'образом» в начале.\n'
   + '- В ответе только переписанный фрагмент, без пояснений.';
 
-/**
- * Фактура, которая обязана пережить перепись.
- *
- * Замер показал, зачем это нужно: при переписи куска модель молча
- * выбрасывает ссылки на нормы. Из шести ссылок чернового раздела до
- * чистовика дошли три — пропали ст. 1193, ст. 1210, ст. 782 и
- * упоминание ТК РФ. В задании при этом прямым текстом стояло
- * «ничего не выбрасывай»: запрет в промпте работу кода не заменяет.
- *
- * Пропажа опасна именно своей незаметностью. Текст остаётся гладким
- * и осмысленным, студент ничего не заподозрит, а научный руководитель
- * увидит рассуждение о норме без ссылки на неё.
- */
-function extractFacts(text) {
-  const facts = new Set();
-  const add = (re) => {
-    for (const m of text.matchAll(re)) {
-      facts.add(m[0].replace(/\s+/g, ' ').trim());
-    }
-  };
-  add(/(?:ст|п|ч|абз|гл)\.\s*\d+(?:\.\d+)?/gi);   // ст. 15, п. 2.1
-  add(/№\s*\d+[-–]?[А-ЯA-Zа-яa-z]*/g);             // № 44-ФЗ, № 1-П
-  add(/\b(?:ГК|УК|ТК|КоАП|ГПК|АПК|УПК|НК|СК|ЖК|БК|ЗК)\s*РФ/g);
-  add(/\b(?:19|20)\d{2}\b/g);                      // годы
-  return facts;
-}
-
-/** Что из фактуры куска не дошло до переписанного варианта. */
-function lostFacts(before, after) {
-  const was = extractFacts(before);
-  const now = extractFacts(after);
-  return [...was].filter((f) => !now.has(f));
-}
+// Извлечение и сверка фактуры вынесены в api/facts.js: те же правила
+// нужны и сторожу переписи, и сведению вариантов, а держать их
+// копиями уже выходило боком — в копии жила ошибка с кириллицей.
 
 
 async function rewriteBlind(piece, style) {
@@ -226,6 +201,7 @@ async function rewriteWithWindow(piece, style, prevDone, nextDraft) {
     let retries = 0;
     let fallbacks = 0;
     let lostTotal = 0;
+    let shortfalls = 0;
 
     for (let i = 0; i < pieces.length; i++) {
       const piece = pieces[i];
@@ -242,24 +218,56 @@ async function rewriteWithWindow(piece, style, prevDone, nextDraft) {
         // Сторож: пропажу ссылки видно сравнением множеств, и это
         // единственный надёжный способ. Просим переписать заново,
         // назвав пропавшее поимённо.
+        //
+        // Сторож следит за двумя вещами сразу. Первая — фактура.
+        // Вторая — объём: замер показал, что перепись молча ужимает
+        // кусок на пятую часть, и раздел на 5500 знаков превращается
+        // в 4500. Слова «объём примерно тот же» в задании на это не
+        // влияют, поэтому недобор ловится счётом знаков.
         let lost = lostFacts(piece, text);
-        if (lost.length) {
+        let short = text.length < piece.length * KEEP_SHARE;
+
+        if (lost.length || short) {
           retries += 1;
-          const demand = `${TASK}\n\nОБЯЗАТЕЛЬНО сохрани в тексте: `
-            + `${lost.join(', ')}. В прошлый раз ты это потерял.`
+          const claims = [];
+          if (lost.length) {
+            claims.push(`ОБЯЗАТЕЛЬНО сохрани в тексте: ${lost.join(', ')}. `
+              + 'В прошлый раз ты это потерял.');
+          }
+          if (short) {
+            claims.push(`Объём: в исходном фрагменте ${piece.length} знаков, `
+              + `в твоём прошлом ответе ${text.length}. Нужно не меньше `
+              + `${Math.round(piece.length * KEEP_SHARE)} знаков — `
+              + 'разверни мысль подробнее, но ничего не придумывай сверх '
+              + 'сказанного.');
+          }
+          const demand = `${TASK}\n\n${claims.join('\n')}`
             + `\n\nФРАГМЕНТ ДЛЯ ПЕРЕПИСИ:\n${piece}`;
-          text = await ask([
+          const second = await ask([
             { role: 'system', content: style },
             { role: 'user', content: demand },
           ]);
-          lost = lostFacts(piece, text);
+          // Берём вторую попытку, только если она действительно лучше:
+          // бывает, что исправив объём, модель роняет ссылку.
+          const secondLost = lostFacts(piece, second);
+          if (secondLost.length <= lost.length) {
+            text = second;
+            lost = secondLost;
+            short = text.length < piece.length * KEEP_SHARE;
+          }
         }
+
         if (lost.length) {
-          // Вторая попытка тоже потеряла — берём черновой кусок.
+          // Фактуру вернуть не удалось — берём черновой кусок.
           // Корявая фраза лучше пропавшей ссылки на закон.
           fallbacks += 1;
           lostTotal += lost.length;
           text = piece;
+        } else if (short) {
+          // Фактура цела, но кусок усох. Это не повод терять стиль:
+          // оставляем переписанное и просто считаем недобор, чтобы
+          // добрать объём на уровне всего раздела.
+          shortfalls += 1;
         }
       }
 
@@ -273,8 +281,10 @@ async function rewriteWithWindow(piece, style, prevDone, nextDraft) {
     console.log(`\r  ${title}: ${result.length} знаков за `
       + `${Math.round((Date.now() - t0) / 1000)} с`
       + (id === 'guard' ? `; переписей на бис ${retries}, `
-        + `откатов к черновику ${fallbacks}` : '')
+        + `откатов к черновику ${fallbacks}, усохших кусков ${shortfalls}` : '')
       + `\n      потеряно фактуры: ${lost.length}`
-      + (lost.length ? ` (${lost.join(', ')})` : ''));
+      + (lost.length ? ` (${lost.join(', ')})` : '')
+      + `\n      объём: ${Math.round((result.length / draft.length - 1) * 100)} % `
+      + `к черновику`);
   }
 })();
