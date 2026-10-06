@@ -88,6 +88,32 @@ function extractFacts(text) {
 }
 
 /**
+ * Ссылки на источники: [1], [2, с. 45].
+ *
+ * Отдельно от фактуры, потому что это другая сущность: не норма, а
+ * указание, откуда взята мысль. Теряются они так же молча — замер
+ * конвейера показал, что перепись съела три ссылки из девятнадцати,
+ * и раздел местами превратился в пересказ без опоры.
+ */
+function extractRefs(text) {
+  const out = new Set();
+  if (!text) return out;
+  for (const m of String(text).matchAll(/\[(\d{1,2})(?:\s*,[^\]]*)?\]/g)) {
+    out.add(m[1]);
+  }
+  return out;
+}
+
+/**
+ * Какие ссылки на источники пропали при переписи.
+ */
+function lostRefs(before, after) {
+  const was = extractRefs(before);
+  const now = extractRefs(after);
+  return [...was].filter((r) => !now.has(r));
+}
+
+/**
  * Что было в исходном тексте, но пропало в переписанном.
  *
  * @param {string} before черновой кусок
@@ -100,4 +126,4 @@ function lostFacts(before, after) {
   return [...was].filter((f) => !now.has(f));
 }
 
-module.exports = { extractFacts, lostFacts };
+module.exports = { extractFacts, lostFacts, extractRefs, lostRefs };

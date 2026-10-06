@@ -48,3 +48,19 @@ test('пустой текст не ломает', () => {
   assert.strictEqual(extractFacts('').size, 0);
   assert.deepStrictEqual(lostFacts('', ''), []);
 });
+
+test('ссылки на источники читаются', () => {
+  const { extractRefs } = require('../api/facts.js');
+  const refs = extractRefs('как пишет [1] и [2, с. 45], а также [10]');
+  assert.deepStrictEqual([...refs].sort(), ['1', '10', '2']);
+});
+
+test('потеря ссылки на источник видна', () => {
+  const { lostRefs } = require('../api/facts.js');
+  assert.deepStrictEqual(lostRefs('есть [1] и [2]', 'только [1]'), ['2']);
+});
+
+test('номер страницы в ссылке не считается отдельным источником', () => {
+  const { extractRefs } = require('../api/facts.js');
+  assert.deepStrictEqual([...extractRefs('[2, с. 45]')], ['2']);
+});
