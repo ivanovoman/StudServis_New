@@ -9,6 +9,7 @@ const { parseSlides } = require('./slides');
 const { fixHybrids, stripLibraryMarkers } = require('./textfix');
 const { generateFragmentDocx, generateFullDocx } = require('./docxExport');
 const { resolveProviders, modelsFor } = require('./providers');
+const { fetchDossier, dossierBlock } = require('./dossier');
 
 const START_TIME = new Date().toISOString();
 
@@ -1408,6 +1409,15 @@ async function writePiece(task, ctx, opts = {}) {
   const libHits = await fetchLibrary(ownerKey, libQuery);
   const libBlock = libraryBlock(libHits);
   if (libBlock) messages.push({ role: 'system', content: libBlock });
+
+  // Досье по разделу — выдержки из прочитанных целиком статей.
+  // Ставится предпоследним, вплотную к образцу стиля: это главный
+  // источник содержания, и тонуть в середине он не должен. Если
+  // глубокий разбор темы не делался, блок пустой и ничего не меняет.
+  const dossier = await fetchDossier(
+    ownerKey, task.heading || task.title, (settings && settings.topic) || '');
+  const dosBlock = dossierBlock(dossier);
+  if (dosBlock) messages.push({ role: 'system', content: dosBlock });
 
   // Образцы авторской манеры — последним системным блоком, вплотную к
   // заданию: GigaChat склеивает все system в одно сообщение, и то,

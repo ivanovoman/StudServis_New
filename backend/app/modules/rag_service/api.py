@@ -13,6 +13,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db import get_session
 from app.modules.rag_service import research
+from app.modules.rag_service.dossier import (
+    DEFAULT_BUDGET_CHARS,
+    build_dossier,
+    useful_norms,
+)
 from app.modules.rag_service.library import (
     add_document,
     get_style_samples,
@@ -205,4 +210,53 @@ async def harvest(
             }
             for a in result.read
         ],
+    }
+
+
+class DossierIn(BaseModel):
+    """Запрос досье по одному разделу работы."""
+
+    heading: str = Field(min_length=3, max_length=300)
+    topic: str = Field(default="", max_length=300)
+    queries: list[str] = Field(default_factory=list, max_length=4)
+    budget_chars: int = Field(default=DEFAULT_BUDGET_CHARS, ge=1000, le=20000)
+    research_only: bool = True
+
+
+@router.post("/research/dossier", summary="Собрать материал под раздел")
+async def dossier(
+    payload: DossierIn,
+    key: str = Depends(owner_key),
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    """Выдержки из прочитанных статей под конкретный раздел.
+
+    Это ответ на главную беду черновика: без поданного материала
+    модель сочиняет фактуру, и проверка показала, что сочиняет охотно
+    и правдоподобно. С поданным — пользуется тем, что дали, и почти
+    не добавляет своего. Поэтому перед написанием каждого раздела из
+    добытых статей отбирается то, что относится к его теме.
+    """
+    result = await build_dossier(
+        session,
+        owner_key=key,
+        heading=payload.heading,
+        topic=payload.topic,
+        queries=payload.queries,
+        budget_chars=payload.budget_chars,
+        research_only=payload.research_only,
+    )
+    return {
+        "heading": result.heading,
+        "queries": result.queries,
+        "sources": result.sources,
+        "excerpts": len(result.excerpts),
+        "chars": result.chars,
+        "facts": result.facts,
+        # Отдельно — то, на что модели разрешено ссылаться. Из общей
+        # фактуры выкинуты годы и номера сносок: по ним сослаться
+        # нельзя, а соблазн у модели есть.
+        "norms": useful_norms(result.facts),
+        "names": result.names,
+        "prompt_block": result.prompt_block,
     }
