@@ -12,6 +12,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db import get_session
+from app.modules.rag_service import research
 from app.modules.rag_service.library import (
     add_document,
     get_style_samples,
@@ -36,6 +37,18 @@ async def owner_key(x_owner_key: str = Header(default="")) -> str:
             ),
         )
     return key
+
+
+class HarvestIn(BaseModel):
+    #: Поисковые формулировки. Их готовит модель, разложив тему на
+    #: исследовательские вопросы: по одной формулировке находится
+    #: втрое меньше, чем по шести разным.
+    queries: list[str] = Field(min_length=1, max_length=12)
+    topic: str = Field(default="", max_length=500)
+    read_limit: int = Field(default=research.DEFAULT_READ_LIMIT, ge=1, le=25)
+    #: Второй круг добычи идёт без очистки: он дополняет первый, а не
+    #: заменяет его.
+    clear_before: bool = True
 
 
 class SearchIn(BaseModel):
@@ -151,3 +164,45 @@ async def style(
     samples = await get_style_samples(
         session, owner_key=key, limit=max(1, min(limit, 5)))
     return {"count": len(samples), "samples": samples}
+
+
+@router.post("/research/harvest", summary="Найти и прочитать статьи целиком")
+async def harvest(
+    payload: HarvestIn,
+    key: str = Depends(owner_key),
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    """Собрать материал для глубокого разбора темы.
+
+    Прежний разбор видел только аннотации — полторы тысячи знаков на
+    всю тему, из которых нельзя узнать ни кто с кем спорит, ни где в
+    регулировании дыра. Здесь статьи читаются целиком: пятнадцать
+    статей дают около трёхсот тысяч знаков, и дальше по ним работает
+    обычный поиск библиотеки.
+    """
+    result = await research.harvest(
+        session,
+        owner_key=key,
+        queries=payload.queries,
+        topic=payload.topic,
+        read_limit=payload.read_limit,
+        clear_before=payload.clear_before,
+    )
+    return {
+        "found": result.found,
+        "read": result.read_count,
+        "skipped": result.skipped,
+        "chars": result.total_chars,
+        "articles": [
+            {
+                "title": a.title,
+                "authors": a.authors,
+                "year": a.year,
+                "journal": a.journal,
+                "url": a.url,
+                "chars": a.chars,
+                "chunks": a.chunks,
+            }
+            for a in result.read
+        ],
+    }
