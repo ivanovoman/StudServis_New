@@ -225,6 +225,40 @@ def _is_promo(text: str) -> bool:
     return bool(RE_PROMO.search(text))
 
 
+# Служебные страницы научной работы: титул, оглавление, список
+# литературы. Манеры письма в них нет никакой — одни заголовки и
+# выходные данные, — а в начале документа они стоят первыми, и
+# равномерный отбор образцов утыкается прямо в них.
+RE_SERVICE = re.compile(
+    r"СОДЕРЖАНИЕ|ОГЛАВЛЕНИЕ|СПИСОК\s+(?:ЛИТЕРАТУРЫ|ИСТОЧНИКОВ|"
+    r"ИСПОЛЬЗОВАННЫХ)|образовательное\s+учреждение|Научный\s+руководитель|"
+    r"Выполнил|ЗАМЕНИТЬ\s+ТИТУЛЬНЫМ|Нормативные\s+правовые\s+акты",
+    re.IGNORECASE,
+)
+
+
+def _is_service(text: str) -> bool:
+    """Похож ли кусок на титул, оглавление или список литературы."""
+    if RE_SERVICE.search(text):
+        return True
+
+    # Список литературы узнаётся по библиографическим приметам: косые
+    # черты перед названием журнала, адреса, диапазоны страниц. Сам
+    # заголовок «СПИСОК ЛИТЕРАТУРЫ» в кусок может и не попасть —
+    # список длинный, он режется на несколько фрагментов.
+    biblio = (len(re.findall(r"\s//\s", text))
+              + len(re.findall(r"URL:", text))
+              + len(re.findall(r"\bС\.\s*\d+\s*[-–]\s*\d+", text)))
+    if biblio >= 3:
+        return True
+
+    # Оглавление узнаётся и без заголовка: много пунктов вида «1.2.»
+    # на небольшом объёме и почти нет законченных предложений.
+    numbering = len(re.findall(r"\b\d+\.\d*\.?\s+[А-ЯЁA-Z]", text))
+    sentences = len(re.findall(r"[а-яёa-z][.!?](?:\s|$)", text))
+    return numbering >= 3 and sentences < numbering
+
+
 def _strip_promo_sentences(text: str) -> str:
     """Убирает рекламные предложения, оставляя остальной абзац.
 
@@ -438,31 +472,67 @@ async def get_style_samples(session: AsyncSession, *, owner_key: str,
     предмет статьи вместо способа изложения.
     """
     rows = (await session.execute(
-        select(UserDocumentChunk.text)
+        select(UserDocumentChunk.text, UserDocumentChunk.document_id)
         .join(UserDocument, UserDocument.id == UserDocumentChunk.document_id)
         .where(
             UserDocumentChunk.owner_key == owner_key,
             UserDocument.kind == KIND_STYLE,
         )
-        .order_by(UserDocumentChunk.position)
+        .order_by(UserDocumentChunk.document_id, UserDocumentChunk.position)
     )).all()
 
-    chunks = [r[0] for r in rows
-              if 300 <= len(r[0]) <= max_chars and not _is_promo(r[0])]
-    if not chunks:
-        # Ничего подходящего по длине — берём что есть, обрезав.
-        chunks = [r[0][:max_chars] for r in rows
-                  if len(r[0]) >= 200 and not _is_promo(r[0])]
-    if not chunks:
+    # Сначала раскладываем по документам всё годное, потом добираем
+    # обрезанным — но по каждому документу отдельно.
+    #
+    # Раньше запасной путь был общий: «если вообще ничего не нашлось».
+    # Из-за этого документ, у которого все куски оказались длиннее
+    # предела, выпадал целиком, пока у остальных куски подходили. На
+    # деле так и вышло с магистерской работой.
+    by_doc: dict[str, list[str]] = {}
+    long_only: dict[str, list[str]] = {}
+    for text, doc_id in rows:
+        if _is_promo(text) or _is_service(text):
+            continue
+        if 300 <= len(text) <= max_chars:
+            by_doc.setdefault(doc_id, []).append(text)
+        elif len(text) > max_chars:
+            long_only.setdefault(doc_id, []).append(text[:max_chars])
+
+    for doc_id, chunks in long_only.items():
+        by_doc.setdefault(doc_id, chunks)
+
+    if not by_doc:
+        for text, doc_id in rows:
+            if len(text) >= 200 and not _is_promo(text):
+                by_doc.setdefault(doc_id, []).append(text[:max_chars])
+    if not by_doc:
         return []
 
-    if len(chunks) <= limit:
-        return chunks
+    # Сначала по одному отрывку из каждого документа, и только потом
+    # вторые заходы.
+    #
+    # Раньше отбор шёл по общему списку кусков, и это работало, пока
+    # образец был один. Когда к статьям добавились курсовые и
+    # магистерская, самый толстый документ занял собой две трети
+    # списка: в задание уходили два отрывка из него и ни одного из
+    # курсовой. Манера у автора в статьях и в научных работах разная,
+    # и показывать надо обе.
+    docs = list(by_doc.values())
+    picked: list[str] = []
+    round_no = 0
+    while len(picked) < limit and round_no < max(len(c) for c in docs):
+        for chunks in docs:
+            if len(picked) >= limit:
+                break
+            # Внутри документа — равномерно: начало, середина, конец.
+            if round_no < len(chunks):
+                step = len(chunks) / max(limit, 1)
+                idx = min(int(round_no * step) if step >= 1 else round_no,
+                          len(chunks) - 1)
+                picked.append(chunks[idx])
+        round_no += 1
 
-    # Равномерно по документу: начало, середина, конец. Подряд идущие
-    # куски дали бы одну тему и одну интонацию.
-    step = len(chunks) / limit
-    return [chunks[min(int(i * step), len(chunks) - 1)] for i in range(limit)]
+    return picked[:limit]
 
 
 async def search_documents(session: AsyncSession, *, owner_key: str,

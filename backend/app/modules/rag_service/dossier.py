@@ -28,7 +28,7 @@ from dataclasses import dataclass, field
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from .facts import extract_facts, extract_names
+from .facts import extract_facts, extract_names, extract_norm_refs, norm_hits
 from .library import search_documents
 from .research import KIND_RESEARCH
 
@@ -47,6 +47,9 @@ DEFAULT_BUDGET_CHARS = 9000
 # Ограничение не техническое, а содержательное: без него одна большая
 # и хорошо написанная статья вытесняет все прочие, и раздел получается
 # её пересказом. Четыре куска с одного источника — потолок.
+# Доля бюджета досье, отложенная под выдержки со ссылками на нормы.
+NORM_RESERVE_SHARE = 0.3
+
 MAX_EXCERPTS_PER_SOURCE = 4
 
 # Сколько источников должно быть в досье, чтобы раздел не выглядел
@@ -96,6 +99,7 @@ class Dossier:
     sources: list[str] = field(default_factory=list)
     facts: list[str] = field(default_factory=list)
     names: list[str] = field(default_factory=list)
+    norm_refs: list[str] = field(default_factory=list)
     chars: int = 0
     prompt_block: str = ""
 
@@ -136,6 +140,30 @@ def _queries_for(heading: str, topic: str, extra: list[str] | None) -> list[str]
             seen.add(key)
             out.append(q)
     return out[:5]
+
+
+# Слова-приманки для фактурных запросов.
+#
+# Поиск по смыслу раздела находит рассуждения, а ссылки на нормы в
+# научных статьях редки — одна на пять тысяч знаков — и в такую
+# выдачу просто не попадают. Проверено на живой библиотеке: по трём
+# обычным запросам пул из семнадцати кусков не содержал ни одной
+# ссылки, а те же статьи по запросу со словами ниже дают двенадцать
+# связок на двенадцати кусках.
+_NORM_BAIT = ("Конституция Российской Федерации статья "
+              "высшая юридическая сила ГК РФ норма закона")
+_PRACTICE_BAIT = ("Верховный Суд Конституционный Суд постановление "
+                  "Пленума определение практика")
+
+
+def _fact_queries(heading: str, topic: str) -> list[str]:
+    """Запросы, нацеленные не на смысл, а на фактуру."""
+    ядро = " ".join(
+        dict.fromkeys(re.findall(r"[А-Яа-яЁёA-Za-z]{5,}", f"{heading} {topic}"))
+    ).strip()
+    if not ядро:
+        return []
+    return [f"{ядро} {_NORM_BAIT}", f"{ядро} {_PRACTICE_BAIT}"]
 
 
 def _shorten(text: str, limit: int) -> str:
@@ -179,6 +207,7 @@ async def build_dossier(
 
     seen_texts: set[str] = set()
     pool: list[Excerpt] = []
+    norm_pool: list[Excerpt] = []
 
     for query in search_queries:
         try:
@@ -205,35 +234,108 @@ async def build_dossier(
                 score=float(hit.get("score") or 0),
             ))
 
-    if not pool:
+    # Второй заход — за фактурой. Эти куски в общий пул не кладём:
+    # по смыслу они слабее и вытеснили бы содержательные рассуждения.
+    # Их место — в отложенной под нормы части бюджета.
+    for query in _fact_queries(heading, topic):
+        try:
+            hits = await search_documents(
+                session, owner_key=owner_key, query=query, limit=12,
+            )
+        except Exception as exc:  # noqa: BLE001 — поиск не критичен
+            logger.warning("Запрос за фактурой «%s» не удался: %s", query, exc)
+            continue
+
+        for hit in hits:
+            if research_only and hit.get("kind") != KIND_RESEARCH:
+                continue
+            text = (hit.get("text") or "").strip()
+            if len(text) < MIN_EXCERPT_CHARS or not norm_hits(text):
+                continue
+            key = text[:120]
+            if key in seen_texts:
+                continue
+            seen_texts.add(key)
+            norm_pool.append(Excerpt(
+                source=hit.get("source") or "Источник без названия",
+                text=text,
+                score=float(hit.get("score") or 0),
+            ))
+
+    if not pool and not norm_pool:
         return Dossier(heading=heading, queries=search_queries)
 
     pool.sort(key=lambda e: e.score, reverse=True)
 
     # Отбор с оглядкой на разнообразие источников.
+    #
+    # Отбирать по одной смысловой близости оказалось мало. В разделе
+    # эталонной курсовой ссылка на норму приходится примерно на
+    # восемьсот знаков, а в наших разделах их не было вовсе. Причина
+    # не в модели: нормы в добытых статьях есть, но редко — одна на
+    # пять тысяч знаков, — и в девятитысячное досье при отборе по
+    # близости попадала хорошо если одна.
+    #
+    # Поэтому часть бюджета отложена под выдержки со ссылками на
+    # нормы. Близость остаётся главной: сначала обычный отбор на
+    # урезанный бюджет, и только потом остаток добирается фактурой.
+    # Если фактурных выдержек не нашлось, резерв возвращается общему
+    # отбору — пустым досье не останется.
     taken: list[Excerpt] = []
     per_source: dict[str, int] = {}
     used = 0
+    reserve = int(budget_chars * NORM_RESERVE_SHARE)
 
-    for excerpt in pool:
-        if used >= budget_chars:
-            break
+    def _try_take(excerpt: Excerpt, ceiling: int) -> bool:
+        nonlocal used
+        if used >= ceiling:
+            return False
         if per_source.get(excerpt.source, 0) >= MAX_EXCERPTS_PER_SOURCE:
-            continue
-        room = budget_chars - used
-        text = _shorten(excerpt.text, min(len(excerpt.text), room))
+            return False
+        text = _shorten(excerpt.text, min(len(excerpt.text), ceiling - used))
         if len(text) < MIN_EXCERPT_CHARS:
-            continue
+            return False
+        # Обрезка по бюджету может отсечь как раз ту часть, ради
+        # которой кусок и брали. Тогда он бесполезен.
+        if norm_hits(excerpt.text) and not norm_hits(text):
+            return False
         taken.append(Excerpt(source=excerpt.source, text=text,
                              score=excerpt.score))
         per_source[excerpt.source] = per_source.get(excerpt.source, 0) + 1
         used += len(text)
+        return True
+
+    for excerpt in pool:
+        if used >= budget_chars - reserve:
+            break
+        _try_take(excerpt, budget_chars - reserve)
+
+    # Добор фактурой: по убыванию числа ссылок на нормы, при равенстве
+    # — по смысловой близости.
+    if reserve:
+        rest = norm_pool + [e for e in pool if e not in taken]
+        with_norms = [(norm_hits(e.text), e) for e in rest]
+        with_norms = [(n, e) for n, e in with_norms if n]
+        with_norms.sort(key=lambda pair: (pair[0], pair[1].score), reverse=True)
+        for _, excerpt in with_norms:
+            if used >= budget_chars:
+                break
+            _try_take(excerpt, budget_chars)
+
+    # Резерв не израсходован — отдаём его обычному отбору.
+    for excerpt in pool:
+        if used >= budget_chars:
+            break
+        if excerpt in taken:
+            continue
+        _try_take(excerpt, budget_chars)
 
     # Фактура и имена считаются по отобранному, а не по всей
     # библиотеке: модели нельзя обещать нормы, которых она не увидит.
     joined = "\n".join(e.text for e in taken)
     facts = sorted(extract_facts(joined))
     names = sorted(extract_names(joined))
+    norm_refs = extract_norm_refs(joined)
 
     sources = list(dict.fromkeys(e.source for e in taken))
 
@@ -244,6 +346,7 @@ async def build_dossier(
         sources=sources,
         facts=facts,
         names=names,
+        norm_refs=norm_refs,
         chars=used,
     )
     dossier.prompt_block = format_dossier(dossier)
@@ -270,6 +373,18 @@ def format_dossier(dossier: Dossier) -> str:
         for text in by_source.get(source, []):
             parts.append(f"    «{text}»")
         parts.append("")
+
+    # Связки «статья + акт» идут впереди россыпи: именно ими модель
+    # и должна ссылаться. Россыпь из «ст. 15» и «ГК РФ» порознь
+    # провоцирует собрать пару, которой в источнике не было.
+    if dossier.norm_refs:
+        parts.append(
+            "ССЫЛКИ НА НОРМЫ, ПРЯМО ВСТРЕЧАЮЩИЕСЯ В ЭТИХ ВЫДЕРЖКАХ "
+            "(ссылаться можно только на них, и желательно на большую "
+            "их часть — в научной работе ссылка на норму приходится "
+            "примерно на каждые восемьсот знаков): "
+            + "; ".join(dossier.norm_refs) + "."
+        )
 
     if dossier.facts:
         norms = useful_norms(dossier.facts)
