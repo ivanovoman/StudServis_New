@@ -36,6 +36,26 @@ const MAX_PIECE = 500;
 // Доля исходного объёма, ниже которой кусок считается усохшим.
 const KEEP_SHARE = 0.9;
 
+// Нижняя граница доли коротких фраз.
+//
+// У автора коротких треть (33,5 % по корпусу в 2254 предложения).
+// Казалось бы, столько и надо требовать — но замер показал обратное.
+// Перепись сама, без понуканий, даёт 27,9 %: это близко к автору.
+// А стоило потребовать четверть на каждом куске, как вышло 40,2 % —
+// перебор, текст стал рубленым, медиана упала с 11,5 слова до 9 при
+// авторских 11.
+//
+// Поэтому порог здесь — не цель, а защита от крайности. Он ловит
+// куски, где коротких фраз нет совсем, и не трогает те, что и так
+// в порядке. Попадать в авторскую долю попусту гоняя перепись не
+// нужно: на куске в четыре-пять фраз эта доля всё равно скачет.
+const SHORT_SHARE = 0.18;
+const SHORT_WORDS = 8;
+
+// Куски короче этого на ритм не проверяем: в двух-трёх фразах доля
+// коротких — величина случайная.
+const RHYTHM_MIN_SENTENCES = 4;
+
 // Сколько переписанного текста показывать как левый край окна и
 // сколько чернового — как правый. Окно нужно, чтобы куски стыковались
 // без повторов и без «итак» в начале каждого.
@@ -51,6 +71,55 @@ const TASK = 'Перепиши фрагмент научной работы в �
   + 'образом» в начале.\n'
   + '- В ответе только переписанный фрагмент, без пояснений.';
 
+const GUARD = '\u0000';
+
+/**
+ * Прячет точки, которые предложение не кончают.
+ *
+ * Таких три вида, и каждый в юридическом тексте встречается на
+ * каждой странице:
+ *
+ *   - сокращения: «ст. 15», «п. 2», «с. 204»;
+ *   - десятичные числа: «1.5 раза»;
+ *   - инициалы: «В.Н. Кудрявцев».
+ *
+ * Инициалы добавились позже других и дорого обошлись. Из-за них
+ * сторож ритма видел в разделе 89 предложений вместо 57 и считал
+ * обрывки «В.», «Н.» короткими фразами: доля коротких выходила 45 %
+ * при настоящих 17 %. Та же ошибка рвала текст на куски прямо по
+ * фамилии автора, которого цитируют.
+ */
+function guardDots(text) {
+  const abbr = /(?<![А-Яа-яЁёA-Za-z])(ст|стт|п|пп|ч|абз|гл|разд|подп|г|гг|в|вв|руб|коп|тыс|млн|млрд|см|ср|напр|рис|табл|стр|с|изд|им|др|пр|т|е|д)\./gi;
+  // Инициал — одиночная заглавная буква с точкой.
+  const initials = /(?<![А-Яа-яЁёA-Za-z])([А-ЯЁA-Z])\./g;
+  return String(text || '')
+    .replace(abbr, (m) => m.replace('.', GUARD))
+    .replace(initials, (m, letter) => `${letter}${GUARD}`)
+    .replace(/(\d)\.(\d)/g, `$1${GUARD}$2`);
+}
+
+/**
+ * Делит текст на предложения.
+ *
+ * Граница — точка, за которой идёт пробел и заглавная буква или
+ * цифра. Требование заглавной важно: без него «и т. д. далее по
+ * тексту» разрывается посередине. Переносы строк — тоже границы:
+ * абзац отдельной мыслью считается всегда.
+ *
+ * Эта же мера используется и при нарезке на куски, и при подсчёте
+ * ритма. Когда они расходились, сторож ритма видел в разделе 82
+ * предложения там, где замер стиля насчитывал 53, и гнал перепись
+ * из-за выдуманного недобора коротких фраз.
+ */
+function splitSentences(text) {
+  return guardDots(text)
+    .split(/\n+/)
+    .flatMap((para) => para.split(/(?<=[.!?…])[ \t]+(?=[«"'(\[]?[А-ЯЁA-Z0-9•])/))
+    .map((s) => s.replace(new RegExp(GUARD, 'g'), '.').trim())
+    .filter(Boolean);
+}
+
 /**
  * Нарезка текста на куски по границам предложений.
  *
@@ -59,17 +128,7 @@ const TASK = 'Перепиши фрагмент научной работы в �
  * кусок не дорастёт до нижней границы.
  */
 function splitPieces(text, min = MIN_PIECE, max = MAX_PIECE) {
-  const GUARD = '\u0000';
-  // Сокращения, после которых точка не кончает предложение.
-  const abbr = /(?<![А-Яа-яЁёA-Za-z])(ст|стт|п|пп|ч|абз|гл|разд|подп|г|гг|руб|тыс|млн|см|ср|рис|табл|стр|изд|им|др|пр|т|е|д)\./gi;
-  const guarded = String(text || '')
-    .replace(abbr, (m) => m.replace('.', GUARD))
-    .replace(/(\d)\.(\d)/g, `$1${GUARD}$2`);
-
-  const sentences = guarded
-    .split(/(?<=[.!?…])\s+/)
-    .map((s) => s.replace(new RegExp(GUARD, 'g'), '.').trim())
-    .filter(Boolean);
+  const sentences = splitSentences(text);
 
   const pieces = [];
   let buf = '';
@@ -88,14 +147,30 @@ function splitPieces(text, min = MIN_PIECE, max = MAX_PIECE) {
   return pieces;
 }
 
+/**
+ * Доля коротких фраз в тексте.
+ *
+ * Предложения считаются так же, как при нарезке: точка в «ст. 15»
+ * конец фразы не означает.
+ */
+function shortShare(text) {
+  const sentences = splitSentences(text);
+
+  if (!sentences.length) return { share: 1, sentences: 0, short: 0 };
+  const short = sentences
+    .filter((s) => s.split(/\s+/).filter(Boolean).length <= SHORT_WORDS).length;
+  return { share: short / sentences.length, sentences: sentences.length, short };
+}
+
 /** Правила авторской манеры с образцами. */
 function styleRules(samples) {
   const list = Array.isArray(samples) ? samples : [];
   return 'КАК ПИШЕТ АВТОР, В ЧЬЕЙ МАНЕРЕ НУЖНО ПЕРЕПИСАТЬ\n\n'
-    + 'Предложения РАЗНОЙ длины — это главное. Почти каждое третье '
-    + 'короткое, пять-восемь слов. Попадаются и длинные, одно из семи. '
-    + 'Выравнивать все фразы под одну длину нельзя: ровный текст '
-    + 'машинный.\n'
+    + 'Предложения РАЗНОЙ длины — это главное. Треть фраз короткие, '
+    + 'пять-восемь слов. Но попадаются и длинные, в двадцать пять слов '
+    + 'и больше, — примерно каждая двенадцатая. Выравнивать все фразы '
+    + 'под одну длину нельзя: ровный текст машинный, и короткими '
+    + 'рублеными фразами подряд он тоже машинный.\n'
     + 'Канцелярит под запретом: «является», «осуществляется», '
     + '«в целях», «в рамках», «данный» в значении «этот».\n'
     + 'Прямая оценка вместо уклончивости.\n\n'
@@ -121,6 +196,7 @@ async function polishDraft(draft, opts) {
   let retries = 0;
   let fallbacks = 0;
   let shortfalls = 0;
+  let flats = 0;
 
   for (let i = 0; i < pieces.length; i += 1) {
     const piece = pieces[i];
@@ -151,7 +227,13 @@ async function polishDraft(draft, opts) {
     let dropped = lostRefs(piece, text);
     let short = text.length < piece.length * KEEP_SHARE;
 
-    if (lost.length || dropped.length || short) {
+    // Ритм: у автора почти каждая третья фраза короткая, а перепись
+    // сама по себе до этого не дотягивает.
+    let rhythm = shortShare(text);
+    let flat = rhythm.sentences >= RHYTHM_MIN_SENTENCES
+      && rhythm.share < SHORT_SHARE;
+
+    if (lost.length || dropped.length || short || flat) {
       retries += 1;
       const claims = [];
       if (lost.length) {
@@ -168,6 +250,14 @@ async function polishDraft(draft, opts) {
           + `в твоём прошлом ответе ${text.length}. Нужно не меньше `
           + `${Math.round(piece.length * KEEP_SHARE)} знаков — разверни `
           + 'мысль подробнее, но ничего не придумывай сверх сказанного.');
+      }
+      if (flat) {
+        const нужно = Math.ceil(rhythm.sentences * SHORT_SHARE);
+        claims.push(`Ритм: в твоём прошлом ответе ${rhythm.sentences} `
+          + `предложений, коротких (до ${SHORT_WORDS} слов) всего `
+          + `${rhythm.short}. Нужно минимум ${нужно}. Разбей длинные `
+          + 'фразы на части — короткая фраза после длинной держит '
+          + 'внимание, а ровный текст читается как машинный.');
       }
 
       const second = await ask([
@@ -186,6 +276,9 @@ async function polishDraft(draft, opts) {
         lost = secondLost;
         dropped = secondDropped;
         short = text.length < piece.length * KEEP_SHARE;
+        rhythm = shortShare(text);
+        flat = rhythm.sentences >= RHYTHM_MIN_SENTENCES
+          && rhythm.share < SHORT_SHARE;
       }
     }
 
@@ -194,8 +287,9 @@ async function polishDraft(draft, opts) {
       // фраза лучше пропавшей ссылки на закон.
       fallbacks += 1;
       text = piece;
-    } else if (short) {
-      shortfalls += 1;
+    } else {
+      if (short) shortfalls += 1;
+      if (flat) flats += 1;
     }
 
     done.push(text);
@@ -209,7 +303,9 @@ async function polishDraft(draft, opts) {
     retries,
     fallbacks,
     shortfalls,
+    flats,
     lost: lostFacts(draft, result),
+    shortShare: shortShare(result).share,
     droppedRefs: lostRefs(draft, result),
   };
 }
@@ -218,6 +314,9 @@ module.exports = {
   MIN_PIECE,
   MAX_PIECE,
   KEEP_SHARE,
+  SHORT_SHARE,
+  shortShare,
+  splitSentences,
   TASK,
   splitPieces,
   styleRules,

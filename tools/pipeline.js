@@ -181,7 +181,10 @@ const чисто = (t) => t.replace(/\s/g, '').length;
   console.log(`\r4. Чистовик: ${чисто(polished.text)} знаков без пробелов, `
     + `${polished.pieces} кусков — ${polishSec} с`);
   console.log(`   переписей на бис ${polished.retries}, откатов к черновику `
-    + `${polished.fallbacks}, усохших кусков ${polished.shortfalls}`);
+    + `${polished.fallbacks}, усохших кусков ${polished.shortfalls}, `
+    + `ровных по ритму ${polished.flats}`);
+  console.log(`   коротких фраз в итоге: `
+    + `${Math.round(polished.shortShare * 100)} % (у автора 33,5 %)`);
 
   // --- Что получилось ---------------------------------------------
   const refs = (t) => [...t.matchAll(/\[(\d{1,2})(?:,[^\]]*)?\]/g)].length;

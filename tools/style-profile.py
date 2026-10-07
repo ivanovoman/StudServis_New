@@ -43,6 +43,7 @@ ABBR = (
 SENTENCE_BREAK = re.compile(
     r"(?<=[.!?\u2026])[ \t]+(?=[«\"\'(\[]?[А-ЯЁA-Z0-9•])"
 )
+INITIAL = re.compile(r"(?<![А-Яа-яЁёA-Za-z])([А-ЯЁA-Z])\.")
 BULLET = re.compile(r"^(?:[•\-–—*]|\d+[).]\s)")
 _GUARD = "\x00"
 
@@ -55,11 +56,24 @@ def split_sentences(text: str) -> list[str]:
     guarded = re.sub(
         r"(\d)\.(\d)", lambda m: m.group(1) + _GUARD + m.group(2), guarded
     )
-    return [
-        part.replace(_GUARD, ".").strip()
-        for part in SENTENCE_BREAK.split(guarded)
-        if part.strip()
-    ]
+    # Инициалы: «В.Н. Кудрявцев» — не два предложения, а одно имя.
+    # Без этой защиты обрывки «В.» и «Н.» попадали в счёт как
+    # короткие фразы и завышали долю коротких.
+    guarded = re.sub(INITIAL, lambda m: m.group(1) + _GUARD, guarded)
+    # Абзац — всегда граница предложения.
+    #
+    # Без этого «...в общественных отношениях [1].\n\nВ юридической
+    # науке...» считалось одним предложением: выражение для границы
+    # требует пробела или табуляции, а между абзацами стоит перенос.
+    # На тексте из тринадцати кусков так склеивалось двадцать шесть
+    # предложений из восьмидесяти четырёх — доля коротких фраз
+    # выходила втрое меньше настоящей, а средняя длина фразы
+    # завышалась.
+    parts: list[str] = []
+    for para in re.split(r"\n+", guarded):
+        parts.extend(SENTENCE_BREAK.split(para))
+
+    return [p.replace(_GUARD, ".").strip() for p in parts if p.strip()]
 
 
 def is_bullet(sentence: str) -> bool:
