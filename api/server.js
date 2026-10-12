@@ -11,6 +11,7 @@ const { generateFragmentDocx, generateFullDocx } = require('./docxExport');
 const { resolveProviders, modelsFor } = require('./providers');
 const { fetchDossier, dossierBlock } = require('./dossier');
 const { findColloquial, fixRegister } = require('./register');
+const { stripDisclaimers, appendBeforeTail, fixMixedScript } = require('./cleanup');
 
 const START_TIME = new Date().toISOString();
 
@@ -1127,7 +1128,22 @@ const EXPAND_RATIO = 0.5;
  * есть и говорим об этом пользователю, а не крутим цикл бесконечно.
  */
 async function writeFullPiece(task, ctx, send) {
-  let text = await writePiece(task, ctx);
+  // Оговорки модели («Генеративные языковые модели не обладают
+  // собственным мнением…») срезаем сразу — см. api/cleanup.js. Если
+  // от куска почти ничего не осталось, модель отказалась писать по
+  // теме: одна повторная попытка, дальше добор объёма ниже.
+  const clean = (raw, label) => {
+    const r = stripDisclaimers(fixMixedScript(raw).text);
+    if (r.removed.length) {
+      console.log(`Оговорка модели срезана (${label}), «${task.heading || task.title}»: ${r.removed.length}`);
+      if (send) send({ disclaimer: { heading: task.heading || task.title, removed: r.removed.length } });
+    }
+    return r.text;
+  };
+  let text = clean(await writePiece(task, ctx), 'раздел');
+  if (charsNoSpace(text) < 400) {
+    try { text = clean(await writePiece(task, ctx), 'повтор'); } catch (e) { /* оставляем что есть */ }
+  }
 
   const min = MIN_CHARS[task.kind];
 
@@ -1161,8 +1177,11 @@ async function writeFullPiece(task, ctx, send) {
       break;
     }
 
+    added = clean(added, 'добор');
     if (charsNoSpace(added) < 200) break;   // модель отказалась дописывать
-    text = `${text.trim()}\n\n${added.trim()}`;
+    // Добор — перед завершающей связкой «Теперь логично перейти…»,
+    // а не после неё: иначе связка оказывается в середине раздела.
+    text = appendBeforeTail(text, added);
   }
 
   // Научный стиль. Разговорные обороты, идиомы и жаргон («на счету

@@ -190,6 +190,8 @@
             st.textContent = ev.queued.message;
           }
           if (ev.expanding) st.textContent = 'Дописываю до нужного объёма…';
+          // Модель вставила служебную оговорку вместо текста — срезали.
+          if (ev.disclaimer) st.textContent = 'Убрал служебную оговорку модели, дописываю…';
           if (ev.legal && (ev.legal.wrong || []).length) {
             card.appendChild(el('div', 'warn-line',
               'Проверьте ссылки на закон: ' + ev.legal.wrong.join('; ')));

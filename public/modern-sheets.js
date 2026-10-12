@@ -530,6 +530,9 @@
         if (ev.expanding) {
           status.textContent = 'Дописываю: ' + (ev.expanding.heading || '');
         }
+        if (ev.disclaimer) {
+          status.textContent = 'Убрал служебную оговорку модели: ' + (ev.disclaimer.heading || '');
+        }
 
         if (ev.legal) legal = ev.legal;
 

@@ -57,7 +57,26 @@ async function ask(messages) {
 
 (async () => {
   const file = process.argv.slice(2).find((a) => !a.startsWith('--'));
-  const text = file ? fs.readFileSync(file, 'utf8') : CLIENT;
+  // Сначала — оговорки модели («Генеративные языковые модели не
+  // обладают собственным мнением…»), как в writeFullPiece.
+  const { stripDisclaimers, relocateTransitions, fixMixedScript } = require('../api/cleanup.js');
+  const cut = stripDisclaimers(fixMixedScript(file ? fs.readFileSync(file, 'utf8') : CLIENT).text);
+  // Готовая работа: связки из середины разделов — в конец (по заголовкам
+  // «1.2. …», «ГЛАВА 2», «ЗАКЛЮЧЕНИЕ»).
+  let movedTotal = 0;
+  const text = cut.text.split(/\n(?=\s*(?:\d+\.\d+\.?\s|ГЛАВА\s|ЗАКЛЮЧЕНИЕ|ВВЕДЕНИЕ))/).map((part) => {
+    const lines = part.split('\n');
+    const head = /^\s*(?:\d+\.\d+\.?\s|ГЛАВА\s|ЗАКЛЮЧЕНИЕ|ВВЕДЕНИЕ)/.test(lines[0]) ? lines.shift() : '';
+    const r = relocateTransitions(lines.join('\n'));
+    movedTotal += r.moved;
+    return [head, r.text].filter(Boolean).join('\n\n');
+  }).join('\n\n').replace(/\n{3,}/g, '\n\n');
+  if (movedTotal) console.log(`Связок перенесено в конец раздела: ${movedTotal}\n`);
+  if (cut.removed.length) {
+    console.log(`Срезано оговорок модели: ${cut.removed.length}`);
+    cut.removed.forEach((r) => console.log(`  ✂ ${r.slice(0, 140)}…`));
+    console.log('');
+  }
   const len = text.replace(/\s/g, '').length;
 
   const hits = findColloquial(text);

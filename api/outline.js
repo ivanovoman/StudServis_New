@@ -18,8 +18,28 @@
 
 'use strict';
 
-/** Заголовок главы: «## ГЛАВА 2.», «**Глава 2.**», «Глава 2 —». */
-const CHAPTER_RE = /^\s*(?:#{1,4}\s*)?(?:\*\*)?\s*глав[аы]\s*(\d+)\s*[.):—-]?\s*(.*)$/i;
+/**
+ * Заголовок главы: «## ГЛАВА 2.», «**Глава 2.**», «Глава 2 —»,
+ * «Глава II. …», «Глава вторая». Римские цифры и слова модель пишет
+ * нередко — без них глава терялась, разделы уходили в главу-заглушку
+ * без названия, и в работе печаталось голое «ГЛАВА 1».
+ */
+const CHAPTER_RE = /^\s*(?:#{1,4}\s*)?(?:\*\*)?\s*глав[аы]\s*(\d+|[IVXLC]+|перв[а-яё]*|втор[а-яё]*|трет[а-яё]*|четв[её]рт[а-яё]*|пят[а-яё]*)(?![А-Яа-яЁёA-Za-z0-9])\s*[.):—–-]?\s*(.*)$/i;
+
+const ROMAN = { I: 1, V: 5, X: 10, L: 50, C: 100 };
+const WORDS = [/^перв/i, /^втор/i, /^трет/i, /^четв/i, /^пят/i];
+
+/** «2», «II», «вторая» → 2. */
+function chapterNumber(raw) {
+  const r = String(raw || '').trim();
+  if (/^\d+$/.test(r)) return Number(r);
+  if (/^[IVXLC]+$/i.test(r)) {
+    const d = r.toUpperCase().split('').map((c) => ROMAN[c]);
+    return d.reduce((n, v, i) => n + (v < (d[i + 1] || 0) ? -v : v), 0);
+  }
+  const k = WORDS.findIndex((re) => re.test(r));
+  return k >= 0 ? k + 1 : NaN;
+}
 
 /** Заголовок раздела: «### 1.1. Название», «1.1 Название», «**2.3.**». */
 const SECTION_RE = /^\s*(?:#{1,4}\s*)?(?:\*\*)?\s*(\d+)\.(\d+)\s*[.):—-]?\s*(.*)$/;
@@ -74,7 +94,7 @@ function parseOutline(planText) {
     if (chap) {
       inService = false;
       current = {
-        number: Number(chap[1]),
+        number: chapterNumber(chap[1]),
         title: cleanTitle(chap[2]),
         sections: [],
       };
@@ -113,6 +133,13 @@ function parseOutline(planText) {
         brief: '',
       };
       current.sections.push(currentSection);
+      continue;
+    }
+
+    // «ГЛАВА 1» на одной строке, название — на следующей. Без этого
+    // название пропадало, а в работу шло голое «ГЛАВА 1».
+    if (current && !current.title && !currentSection && !inService) {
+      current.title = cleanTitle(trimmed);
       continue;
     }
 
@@ -217,7 +244,7 @@ function resolveChapterTitles({ plan, sections, sectionTitles, chapterTitles } =
   const out = {};
   const put = (num, title) => {
     const key = String(num || '').trim();
-    const value = cleanTitle(String(title || '').replace(/^\s*глава\s+\d+\.?\s*/i, ''));
+    const value = cleanTitle(String(title || '').replace(/^\s*глава\s+(?:\d+|[IVXLC]+)\.?\s*/i, ''));
     if (key && value) out[key] = value;
   };
 
@@ -240,4 +267,5 @@ function resolveChapterTitles({ plan, sections, sectionTitles, chapterTitles } =
   return out;
 }
 
-module.exports = { parseOutline, countSteps, buildQueue, cleanTitle, resolveChapterTitles };
+module.exports = {
+  chapterNumber, parseOutline, countSteps, buildQueue, cleanTitle, resolveChapterTitles };
