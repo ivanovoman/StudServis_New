@@ -10,6 +10,7 @@ const { fixHybrids, stripLibraryMarkers } = require('./textfix');
 const { generateFragmentDocx, generateFullDocx } = require('./docxExport');
 const { resolveProviders, modelsFor } = require('./providers');
 const { fetchDossier, dossierBlock } = require('./dossier');
+const { findColloquial, fixRegister } = require('./register');
 
 const START_TIME = new Date().toISOString();
 
@@ -1129,9 +1130,9 @@ async function writeFullPiece(task, ctx, send) {
   let text = await writePiece(task, ctx);
 
   const min = MIN_CHARS[task.kind];
-  if (!min) return text;
 
-  const MAX_TRIES = 2;
+  // Без нормы объёма добора нет, но проверка стиля ниже нужна всем.
+  const MAX_TRIES = min ? 2 : 0;
   for (let attempt = 1; attempt <= MAX_TRIES; attempt += 1) {
     const have = charsNoSpace(text);
     if (have >= min) break;
@@ -1164,7 +1165,32 @@ async function writeFullPiece(task, ctx, send) {
     text = `${text.trim()}\n\n${added.trim()}`;
   }
 
-  return text;
+  // Научный стиль. Разговорные обороты, идиомы и жаргон («на счету
+  // пусто», «как снежный ком», «инкассо») заказчик нашёл в готовой
+  // работе. Запрет в промпте есть, но промпт не гарантия — переписываем
+  // только предложения с находками и проверяем замену (api/register.js).
+  // REGISTER_FIX=0 — только для замеров: находки считаются, но текст
+  // не правится, чтобы сравнивать промпты по сырому выводу модели.
+  const askFix = process.env.REGISTER_FIX === '0' ? null : async (messages) => {
+    const { upstream } = await callOpenRouterWithFallback(messages);
+    return readWholeAnswer(upstream);
+  };
+  const reg = await fixRegister(text, askFix);
+  if (reg.found) {
+    console.log(`Научный стиль, «${task.heading || task.title}»: найдено `
+      + `${reg.found}, исправлено ${reg.fixed}, осталось ${reg.left.length}`);
+    if (send) {
+      send({
+        register: {
+          heading: task.heading || task.title,
+          found: reg.found,
+          fixed: reg.fixed,
+          left: reg.left,
+        },
+      });
+    }
+  }
+  return reg.text;
 }
 
 /**
@@ -1254,8 +1280,9 @@ function styleBlock(samples) {
 
   return 'ОБРАЗЕЦ АВТОРСКОЙ МАНЕРЫ ПИСЬМА\n\n'
     + 'Текст раздела должен быть написан в манере автора, отрывки из '
-    + 'которого приведены ниже. Это требование к ФОРМЕ, и оно важнее '
-    + 'привычного тебе академического тона.\n\n'
+    + 'которого приведены ниже. Это требование к ФОРМЕ: ритм фразы, '
+    + 'прямая оценка, пример после тезиса. Регистр при этом остаётся '
+    + 'академическим — разговорные слова, идиомы и жаргон недопустимы.\n\n'
     // Первая версия этого блока требовала «больше восемнадцати слов —
     // дели». Требование сработало слишком хорошо: длинные фразы ушли
     // ниже авторской нормы, а разброс длин упал с 10,7 до 7,1 при
@@ -1271,7 +1298,8 @@ function styleBlock(samples) {
     + 'машинный, даже если каждая фраза хороша.\n'
     + 'Как добиться ритма: высказал мысль длинной фразой — следующую '
     + 'сделай короткой. Короткая фраза ставит точку в рассуждении: '
-    + '«Это не так». «Убытки нужно доказывать». «Закон молчит».\n'
+    + '«Это не так». «Убытки нужно доказывать». «Закон этот вопрос '
+    + 'не регулирует».\n'
     + 'Пример переделки. Плохо (всё ровно): «Юридическая коллизия '
     + 'представляет собой противоречие между нормами, регулирующими '
     + 'одно отношение. Такое противоречие разрешается при помощи '
@@ -1303,7 +1331,11 @@ function styleBlock(samples) {
     + 'ЧЕГО НЕ ДЕЛАТЬ: не копируй предмет отрывков, не вставляй их '
     + 'примеры, не повторяй их формулировки дословно. Тема твоего '
     + 'раздела другая. Научная работа остаётся научной: манера живая, '
-    + 'но не фамильярная, без обращений к читателю на «вы».\n\n'
+    + 'но не фамильярная, без обращений к читателю на «вы», без '
+    + 'разговорных слов («пусто», «надо», «вот», «увы»), идиом («как '
+    + 'снежный ком», «головная боль») и жаргона («инкассо»). В отрывках '
+    + 'из статей такое встречается — это публицистика, в курсовую не '
+    + 'переносить.\n\n'
     + parts.join('\n\n');
 }
 
@@ -1423,7 +1455,13 @@ async function writePiece(task, ctx, opts = {}) {
   // Образцы авторской манеры — последним системным блоком, вплотную к
   // заданию: GigaChat склеивает все system в одно сообщение, и то,
   // что стоит в середине, выполняется заметно хуже.
-  const styleSamples = await fetchStyle(ownerKey);
+  // Отрывки с разговорными оборотами в образец не берём: в статьях
+  // автора они есть («надо», «вот», «увы», «по факту» — 23 на 300
+  // тысяч знаков), и модель переносит их в курсовую как примету манеры.
+  // Просим с запасом, оставляем три чистых.
+  const styleSamples = (await fetchStyle(ownerKey, 6))
+    .filter((t) => !findColloquial(t).length)
+    .slice(0, 3);
   const stBlock = styleBlock(styleSamples);
   if (stBlock) messages.push({ role: 'system', content: stBlock });
 
