@@ -76,7 +76,7 @@ async function ask(messages) {
 
   for (const c of r.changes) {
     console.log(`БЫЛО:  ${c.before}`);
-    console.log(`СТАЛО: ${c.after}\n`);
+    console.log(`СТАЛО: ${c.after || '(удалено — повтор предыдущей мысли)'}\n`);
   }
   const kept = before.filter((o) => r.text.includes(o.sentence));
   for (const o of kept) console.log(`НЕ ПРИНЯТО (оставлено как было): ${o.sentence}\n`);
