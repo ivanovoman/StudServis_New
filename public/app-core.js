@@ -351,7 +351,7 @@
    * разошлись бы — один из путей молча отдавал бы кривой файл.
    *
    * @param {Array} pieces   части работы: {kind, number, heading, text}
-   * @param {object} opts    {settings, sources}
+   * @param {object} opts    {settings, sources, plan, topic}
    */
   function exportFullDocx(pieces, opts) {
     opts = opts || {};
@@ -366,7 +366,10 @@
       if (p.kind === 'introduction') intro = p.text;
       else if (p.kind === 'conclusion') conclusion = p.text;
       else {
-        sections.push({ number: p.number, text: p.text, table: p.table });
+        sections.push({
+          number: p.number, text: p.text, table: p.table,
+          chapterTitle: p.chapterTitle || undefined,
+        });
         if (p.heading) {
           sectionTitles[p.number] = String(p.heading).replace(/^[\d.]+\s*/, '');
         }
@@ -384,6 +387,9 @@
         sections: sections,
         conclusion: conclusion,
         sectionTitles: sectionTitles,
+        // По плану сервер восстановит названия глав. Без него в файле
+        // стояли голые «ГЛАВА 1», «ГЛАВА 2».
+        plan: opts.plan || '',
         sources: opts.sources || [],
         titlePage: {
           topic: topic,

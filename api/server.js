@@ -3,7 +3,7 @@ require('dotenv').config();
 const express = require('express');
 const path = require('path');
 const { STEP_PROMPTS, applyChapters } = require('./prompts');
-const { parseOutline, buildQueue } = require('./outline');
+const { parseOutline, buildQueue, resolveChapterTitles } = require('./outline');
 const { createQueue } = require('./jobqueue');
 const { parseSlides } = require('./slides');
 const { fixHybrids, stripLibraryMarkers } = require('./textfix');
@@ -923,6 +923,7 @@ app.post('/api/assemble', async (req, res) => {
           kind: task.kind,
           number: task.number || null,
           heading: task.heading || task.title,
+          chapterTitle: task.chapterTitle || undefined,
           text,
           chars: text.replace(/\s/g, '').length,
           fixed: fixed.length ? fixed : undefined,
@@ -1601,6 +1602,7 @@ app.post('/api/section', async (req, res) => {
         kind: task.kind,
         number: task.number || null,
         heading: task.heading || task.title,
+        chapterTitle: task.chapterTitle || undefined,
         text,
         chars: text.replace(/\s/g, '').length,
         fixed: fixed.length ? fixed : undefined,
@@ -1699,7 +1701,13 @@ async function fetchBibliography(topic) {
 
 app.post('/api/export-docx-full', async (req, res) => {
   try {
-    const { topic, introduction, sections, conclusion, chapterTitles, sectionTitles, titlePage, sources } = req.body;
+    const { topic, introduction, sections, conclusion, sectionTitles, titlePage, sources, plan } = req.body;
+    // Названия глав: из плана, из частей, из явного словаря. Без этого
+    // в документе стояли голые «ГЛАВА 1», «ГЛАВА 2» — подробности в
+    // resolveChapterTitles.
+    const chapterTitles = resolveChapterTitles({
+      plan, sections, sectionTitles, chapterTitles: req.body.chapterTitles,
+    });
     if (!topic) {
       return res.status(400).json({ error: 'Нет темы работы для экспорта' });
     }

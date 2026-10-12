@@ -260,7 +260,7 @@
         .map(function (k) { return written[k]; });
       if (!pieces.length) return;
       status.textContent = 'Собираю файл…';
-      window.StudCore.exportFullDocx(pieces, { sources: sources })
+      window.StudCore.exportFullDocx(pieces, { sources: sources, plan: plan })
         .then(function () { status.textContent = 'Файл скачан'; })
         .catch(function (e) { status.textContent = 'Ошибка: ' + e.message; });
     };

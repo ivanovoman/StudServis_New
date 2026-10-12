@@ -359,7 +359,9 @@ function buildContentsPage(sections, chapterTitles, sectionTitles, withBibliogra
       lastChapterNum = chapterNum;
     }
     const sectionNum = s.number ? String(s.number) : null;
-    if (sectionNum) {
+    // Номер без точки — глава, написанная целиком: её заголовок уже
+    // стоит строкой выше, второй («1. Глава 1. …») был бы дублем.
+    if (sectionNum && sectionNum.includes('.')) {
       const sectionName = sectionTitles && sectionTitles[sectionNum];
       blocks.push(makeContentsLine(sectionName ? `${sectionNum}. ${sectionName}` : sectionNum, { indented: true }));
     }
@@ -665,6 +667,7 @@ async function generateFullDocx({ topic, introduction, sections, conclusion, cha
 
   // Группируем разделы по номеру главы (всё до первой точки)
   let lastChapterNum = null;
+  let lastChapterHeading = '';
   for (const s of (sections || [])) {
     const chapterNum = String(s.number || '').split('.')[0];
     if (chapterNum && chapterNum !== lastChapterNum) {
@@ -672,11 +675,19 @@ async function generateFullDocx({ topic, introduction, sections, conclusion, cha
       const heading = chapterName ? `ГЛАВА ${chapterNum}. ${chapterName}` : `ГЛАВА ${chapterNum}`;
       children.push(...makeH1(heading, { pageBreakBefore: true }));
       lastChapterNum = chapterNum;
+      lastChapterHeading = heading;
     }
     const sectionNum = s.number ? String(s.number) : null;
     const sectionName = sectionTitles && sectionNum && sectionTitles[sectionNum];
-    const sectionHeading = sectionName ? `${sectionNum}. ${sectionName}` : sectionNum;
-    children.push(...buildSectionBlocks(sectionHeading, s.text, s.table, srcs, notes));
+    // Глава целиком (номер без точки): заголовок главы уже выведен.
+    const wholeChapter = sectionNum && !sectionNum.includes('.');
+    const sectionHeading = wholeChapter ? null
+      : (sectionName ? `${sectionNum}. ${sectionName}` : sectionNum);
+    // Модель часто повторяет заголовок первой строкой текста. У главы
+    // целиком сверяем его с заголовком главы, а не параграфа.
+    const body = wholeChapter
+      ? stripDuplicateHeading(s.text, lastChapterHeading) : s.text;
+    children.push(...buildSectionBlocks(sectionHeading, body, s.table, srcs, notes));
   }
 
   // ЗАКЛЮЧЕНИЕ — новый H1 с разрывом страницы

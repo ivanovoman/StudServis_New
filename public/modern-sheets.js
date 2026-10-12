@@ -580,7 +580,8 @@
     dl.onclick = function () {
       if (!collected.length) return;
       status.textContent = 'Собираю файл…';
-      window.StudCore.exportFullDocx(collected, { sources: usedSources })
+      window.StudCore.exportFullDocx(collected,
+        { sources: usedSources, plan: input.value })
         .then(function () { status.textContent = 'Файл скачан'; })
         .catch(function (e) {
           status.textContent = 'Ошибка экспорта: ' + e.message;

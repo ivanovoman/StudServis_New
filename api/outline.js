@@ -196,4 +196,48 @@ function buildQueue(outline, opts = {}) {
   return queue;
 }
 
-module.exports = { parseOutline, countSteps, buildQueue, cleanTitle };
+/**
+ * Названия глав для .docx: { "1": "Теоретические основы ...", ... }.
+ *
+ * Без них документ выходил с голыми «ГЛАВА 1», «ГЛАВА 2»: части работы
+ * несут только номер и название параграфа, а название главы жило в
+ * плане и до экспорта не доходило. Собираем из всех мест, где оно
+ * может быть, по возрастанию надёжности — позднее перекрывает раннее:
+ *
+ * 1. План работы. Есть всегда: и при сборке, и у сохранённой работы
+ *    (план лежит в базе вместе с частями).
+ * 2. Глава без параграфов пишется одним куском под номером «1» и
+ *    заголовком «Глава 1. Название» — название берём оттуда.
+ * 3. chapterTitle у части — его ставит сборщик из того же плана.
+ * 4. Словарь, присланный клиентом явно, — например, поправленный руками.
+ *
+ * Пустые названия не записываем: пустое «ГЛАВА 1. » хуже голого номера.
+ */
+function resolveChapterTitles({ plan, sections, sectionTitles, chapterTitles } = {}) {
+  const out = {};
+  const put = (num, title) => {
+    const key = String(num || '').trim();
+    const value = cleanTitle(String(title || '').replace(/^\s*глава\s+\d+\.?\s*/i, ''));
+    if (key && value) out[key] = value;
+  };
+
+  if (plan) {
+    for (const c of parseOutline(plan).chapters) put(c.number, c.title);
+  }
+
+  for (const s of (Array.isArray(sections) ? sections : [])) {
+    if (!s || !s.number) continue;
+    const num = String(s.number);
+    if (!num.includes('.') && sectionTitles && sectionTitles[num]) {
+      put(num, sectionTitles[num]);
+    }
+    if (s.chapterTitle) put(num.split('.')[0], s.chapterTitle);
+  }
+
+  if (chapterTitles && typeof chapterTitles === 'object') {
+    for (const [num, title] of Object.entries(chapterTitles)) put(num, title);
+  }
+  return out;
+}
+
+module.exports = { parseOutline, countSteps, buildQueue, cleanTitle, resolveChapterTitles };

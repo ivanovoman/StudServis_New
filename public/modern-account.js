@@ -276,7 +276,7 @@
                 } catch (e) { settings = {}; }
                 settings.topic = settings.topic || full.topic || '';
                 return window.StudCore.exportFullDocx(full.pieces,
-                  { settings: settings, topic: full.topic });
+                  { settings: settings, topic: full.topic, plan: full.plan });
               })
               .then(function () { st.textContent = 'Скачано'; })
               .catch(function (e) { st.textContent = e.message; });
