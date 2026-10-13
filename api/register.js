@@ -253,7 +253,8 @@ const RULES = [
   { kind: 'жаргон', re: w('подсвет[А-Яа-яЁё]*'), hint: '«выявить», «обозначить»' },
   { kind: 'жаргон', re: w('супер-?ведомств[А-Яа-яЁё]*'), hint: '«единый следственный орган»' },
   { kind: 'жаргон', re: w('отписк[А-Яа-яЁё]*'), hint: '«формальный ответ»' },
-  { kind: 'жаргон', re: w('генерал(?:а|ом|у|ы|ов)?'), hint: '«руководитель следственного органа»' },
+  // «Генерал юстиции» — официальное специальное звание (замер на разделе 1.2).
+  { kind: 'жаргон', re: w('генерал(?:а|ом|у|ы|ов)?(?!\\s+юстиции)'), hint: '«руководитель следственного органа»' },
   { kind: 'жаргон', re: w('в\\s+погонах'), hint: '«должностное лицо правоохранительного органа»' },
   { kind: 'жаргон', re: w('люд[А-Яа-яЁё]*\\s+в\\s+масках'), hint: '«сотрудники силовых подразделений»' },
   { kind: 'жаргон', re: w('«?русск[А-Яа-яЁё]*\\s+ФБР»?'), hint: '«единый следственный орган» (сравнение с ФБР — в кавычках со ссылкой на автора идеи)' },
@@ -280,6 +281,24 @@ const RULES = [
   { kind: 'риторическая подводка', re: w('начн[её]м\\s+с'), hint: '«Первым рассмотрим…»' },
   { kind: 'риторическая подводка', re: w('возьм[её]м'), hint: '«Рассмотрим»' },
   { kind: 'риторическая подводка', re: w('получается,|получается\\s+(?:ситуация|так)'), hint: '«Таким образом», «Возникает ситуация»' },
+  // Замер свежих разделов о СК (incoming/ab): найдено чтением, у автора — 0.
+  { kind: 'разговорная оценка', re: w('(?:цель|задача|логика|мотив|причина|ответ)(?:\\s+[А-Яа-яЁё]+){0,2}\\s+(?:понятна|понятен|прозрачна|благая|проста)|почти\\s+нереальн[А-Яа-яЁё]*|нереальн[А-Яа-яЁё]*'), hint: '«состоит в следующем», «затруднительно»' },
+  { kind: 'риторическая подводка', re: w('(?:риск|проблема|вопрос|сложность)\\s+здесь\\s+(?:один|одна|одно)'), hint: '«Основной риск состоит в…»' },
+  { kind: 'образное выражение', re: w('заложник[А-Яа-яЁё]*'), hint: '«зависит от», «оказалось в зависимости от»' },
+  { kind: 'образное выражение', re: w('(?:занима[А-Яа-яЁё]*|занял[А-Яа-яЁё]*|заня[А-Яа-яЁё]*)\\s+(?:[А-Яа-яЁё]+\\s+)?нишу|ниш[аеуи](?!\\S)'), hint: '«относится к компетенции»' },
+  { kind: 'фразеологизм', re: w('(?:точку\\s+постав[А-Яа-яЁё]*|постав[А-Яа-яЁё]*\\s+точку)'), hint: '«окончательно решил вопрос», «завершил»' },
+  { kind: 'образное выражение', re: w('(?:за[хш][оё]д[А-Яа-яЁё]*|зашл[аио]|зашёл|заходил[аио]?|завести|завод[А-Яа-яЁё]*)\\s+в\\s+тупик|тупик[А-Яа-яЁё]*'), hint: '«не давало результата»' },
+  { kind: 'фразеологизм', re: w('любой\\s+ценой|дорого\\s+сто(?:ят|ит|или)|на\\s+свой\\s+страх\\s+и\\s+риск|замыка[А-Яа-яЁё]*\\s+круг|переломн[А-Яа-яЁё]*\\s+момент[А-Яа-яЁё]*'), hint: '«при любых обстоятельствах», «влекут существенные последствия», «под свою ответственность»' },
+  { kind: 'образное выражение', re: w('ведомственн[А-Яа-яЁё]*\\s+вой(?:на|ны|ну|ной|н|нам)|корень\\s+(?:противоречий|проблем[А-Яа-яЁё]*)|кроется'), hint: '«межведомственные конфликты», «причина противоречий состоит в…»' },
+  { kind: 'разговорное', re: w('разваленн[А-Яа-яЁё]*|время\\s+уход[А-Яа-яЁё]*|не\\s+порт[А-Яа-яЁё]*\\s+показател[А-Яа-яЁё]*|(?:формальн[А-Яа-яЁё]*\\s+)?бумаг[уа](?=\\s*,|\\s+а\\s)|«облак[А-Яа-яЁё]*»'), hint: '«не будет доказано», «сроки истекают», «не ухудшать показатели»' },
+  { kind: 'фразеологизм', re: w('ложит[А-Яа-яЁё]*\\s+на\\s+плечи|леж[А-Яа-яЁё]*\\s+на\\s+плечах|между\\s+двух\\s+огней'), hint: '«возлагается на», «оказываются в противоречивом положении»' },
+  { kind: 'образное выражение', re: w('(?:точк[аиеу]|лини[яиею])\\s+напряжения|узел\\s+противоречий|растворил[А-Яа-яЁё]*'), hint: '«предмет разногласий», «основное противоречие», «было передано»' },
+  { kind: 'разговорное', re: w('чехард[А-Яа-яЁё]*|вещдок[А-Яа-яЁё]*'), hint: '«неоднократная смена подследственности», «вещественные доказательства»' },
+  { kind: 'риторическая подводка', re: w('выбор\\s+предсказуем|исход\\s+предсказуем'), hint: '«как правило, следователь исполняет указание»' },
+  { kind: 'жаргон', re: w('выйти\\s+в\\s+суд|выход[А-Яа-яЁё]*\\s+в\\s+суд|на\\s+входе\\s+(?:процесса|в\\s+процесс)'), hint: '«обратиться в суд», «на начальной стадии»' },
+  { kind: 'образное выражение', re: w('каркас[А-Яа-яЁё]*|предохранител[А-Яа-яЁё]*|из-под\\s+крыла|под\\s+крыл(?:ом|о)|вылива[А-Яа-яЁё]*\\s+в'), hint: '«основа», «гарантия», «из системы прокуратуры», «приводит к»' },
+  { kind: 'жаргон', re: w('силов[А-Яа-яЁё]*\\s+(?:структур[А-Яа-яЁё]*|ведомств[А-Яа-яЁё]*)|элит(?:а|ы|ам|ами|ах)?|квалифколлеги[А-Яа-яЁё]*'), hint: '«правоохранительные органы», «квалификационная коллегия судей»' },
+  { kind: 'фразеологизм', re: w('(?:став[А-Яа-яЁё]*|постав[А-Яа-яЁё]*)\\s+крест|леч[А-Яа-яЁё]*\\s+симптом[А-Яа-яЁё]*|непроходн[А-Яа-яЁё]*|аппаратн[А-Яа-яЁё]*\\s+(?:договор[А-Яа-яЁё]*|игр[А-Яа-яЁё]*|борьб[А-Яа-яЁё]*)'), hint: '«исключает», «устраняет последствия, но не причину», «дела без судебной перспективы»' },
   // «На бумаге следователь самостоятелен» — только в начале фразы:
   // «заявка на бумаге» в магистерской автора — прямое значение.
   // «Правила игры» не ловим: автор сам пишет так в курсовой о коллизиях.
@@ -332,9 +351,9 @@ function colloquialRate(text) {
  * Предложения, в которых есть находки, — с их границами в тексте.
  * Делим так же, как перепись: точка в «ст. 15» конец фразы не означает.
  */
-function offendingSentences(text) {
+function offendingSentences(text, extra = []) {
   const src = String(text || '');
-  const hits = findColloquial(src);
+  const hits = mergeHits(findColloquial(src), extra);
   if (!hits.length) return [];
 
   const { splitSentences } = require('./polish');
@@ -353,6 +372,141 @@ function offendingSentences(text) {
     prev = sentence;
   }
   return out;
+}
+
+/** Слить находки сторожа и рецензента: пересечения — одна находка. */
+function mergeHits(own, extra) {
+  const all = [...own, ...(extra || [])]
+    .sort((x, y) => x.index - y.index || y.match.length - x.match.length);
+  return all.filter((h, i) => !all.slice(0, i).some(
+    (p) => h.index >= p.index && h.index < p.index + p.match.length));
+}
+
+// ---- вторая проверка: модель-рецензент
+//
+// Словарь сторожа ловит только то, что в нём есть. На свежих разделах о
+// СК он увидел 12 оборотов из ~35, найденных чтением: «Цель Петра
+// понятна», «оказалось заложником», «ФСБ занимает нишу», «почти
+// нереально». Все метафоры языка в список не внести, поэтому раздел
+// целиком читает модель и выписывает обороты дословно. Код проверяет
+// каждую цитату: есть ли она в тексте, не норма ли это, не пишет ли так
+// сам автор в академических работах.
+
+const REVIEW_TASK = 'Ты — научный редактор юридической курсовой. Найди в тексте все '
+  + 'обороты, недопустимые в академической работе:\n'
+  + '- разговорные слова и оценки («почти нереально», «Цель понятна», «Задача проста»);\n'
+  + '- метафоры, образные штампы и фразеологизмы («стать заложником», «занять нишу», '
+  + '«поставить точку», «зайти в тупик», «любой ценой»);\n'
+  + '- профессиональный жаргон и журналистские слова («спецсубъект», «фигурант», '
+  + '«громкое дело», «силовики»);\n'
+  + '- риторические подводки («Риск здесь один —», «А вот»).\n'
+  + 'НЕ выписывай: юридические термины, номера норм и дел, цитаты из актов, нейтральные '
+  + 'книжные слова, канцелярит; нейтральные глаголы («соглашаются», «признают», «обходят»); '
+  + 'устоявшиеся выражения практики («скрытый обыск», «обход процедуры»); сдержанные '
+  + 'оценки («выглядит необоснованным», «представляется спорным»). Сомневаешься — не выписывай.\n'
+  + 'Формат — по одной строке на оборот, без пояснений и нумерации:\n'
+  + '«точная цитата из текста» — тип — научная замена\n'
+  + 'Цитата должна совпадать с текстом буква в букву и быть короткой (2–6 слов). '
+  + 'Если таких оборотов нет, ответь одним словом: нет.';
+
+// Что автор сам пишет в академических работах (корпус data/style) —
+// рецензент такое не запрещает. Решения заказчика по «юрлицо»,
+// «бизнес», «зарплата» пока нет — до решения не трогаем.
+// «выглядит необоснованно» — замена, которую предложил сам заказчик.
+// «резонансное дело» — замена, которую промпт сам предлагает вместо «громкое дело».
+const REVIEW_ALLOW = /имущественн\S* сдвиг|работает принцип|резонансн|выглядит необоснованн|представляется|соглаша|по сути|правил[а-я]* игры|ширм|почв[а-я]* для|забра[а-я]* имуществ|юрлиц|бизнес|зарплат|важно отметить|таким образом|IT-/i;
+
+/** Разобрать ответ рецензента в находки (только проверенные цитаты). */
+function parseReview(answer, text) {
+  const src = String(text || '');
+  const lower = src.toLowerCase();
+  const out = [];
+  for (const line of String(answer || '').split('\n')) {
+    // Модель пишет по-разному: «цитата» — тип — замена; «цитата» — тип,
+    // научная замена: «замена»; 1. «цитата» → «замена»; цитата без кавычек
+    // — тип — замена. Строки «не выписывать» / «оставим как есть» — отказ.
+    if (/не\s+выписыва|оставим\s+как\s+есть|оставить\s+как\s+есть|допустим[оа]?\)/i.test(line)) continue;
+    // Сначала тире: стрелки бывают внутри цитаты (схемы автора).
+    const sp = line.match(/^(.+?)\s+(?:[—–]+|-{1,2})\s+(.+)$/) || line.match(/^(.+?)\s*→\s*(.+)$/);
+    if (!sp) continue;
+    let left = sp[1].replace(/^[\s\d.)*•\-–—]+/, '').replace(/\*\*/g, '').trim();
+    const rest = sp[2];
+    // «брак» в работе — цитата шире кавычек; «цитата» — ровно кавычки.
+    const whole = left.match(/^«([^»]+)»[.,:;]?$/);
+    let quote = (whole ? whole[1] : left.replace(/[«»"]/g, '')).trim().replace(/[.,;:]+$/, '');
+    if (quote.length < 3 || quote.length > 120) continue;
+    let repl = '';
+    let kind = '';
+    const byWord = rest.match(/^(.*?)[,;]?\s*(?:научн\S*\s+)?замен\S*\s*[:—–-]\s*(.+)$/i);
+    if (byWord) { kind = byWord[1]; repl = byWord[2]; } else {
+      const parts = rest.split(/\s+[—–-]+\s+|\s*→\s*/);
+      repl = parts.length > 1 ? parts.pop() : rest;
+      kind = parts.join(', ');
+    }
+    kind = kind.replace(/[—–-]+\s*$/, '').trim().toLowerCase() || 'разговорное';
+    repl = repl.trim().replace(/^«|»$/g, '').replace(/»,\s*«/g, '» или «');
+    if (quote.split(/\s+/).length > 12) continue;          // не цитата, а пересказ
+    // Схемы со стрелками и формулы автора («подумал → решил») — не оборот.
+    if (/[→=+«»]/.test(quote)) continue;
+    // Вместо замены — указание («заменить на…», «без упоминания имён»):
+    // такую «правку» модель выполнит удалением фактов. Не берём.
+    if (!repl || /^(?:например|заменить|удалить|убрать|переформулировать)|без\s+упоминания|нейтральн\S*\s+описани/i.test(repl)) continue;
+    // Фраза с фамилией — пример из практики; рецензент склонен её вычищать.
+    if (/(?:^|\s)[А-ЯЁ]\.\s?[А-ЯЁ]?[а-яё]/.test(quote)) continue;
+    if (/\d|ст\.|УК|УПК|ГК|НК|ФЗ|РФ/.test(quote)) continue; // нормы не трогаем
+    if (REVIEW_ALLOW.test(quote)) continue;
+    let at = src.indexOf(quote);
+    if (at < 0) at = lower.indexOf(quote.toLowerCase());
+    if (at < 0) continue;                                     // модель выдумала цитату
+    out.push({
+      kind: `${kind} (рецензент)`, hint: repl, match: src.slice(at, at + quote.length),
+      index: at, drop: false, source: 'review',
+    });
+  }
+  return out;
+}
+
+/** Куски по абзацам, не длиннее limit знаков: рецензент читает раздел целиком. */
+function chunksOf(text, limit = 7000) {
+  const out = [];
+  let cur = '';
+  for (const par of String(text || '').split(/\n\s*\n/)) {
+    if (cur && cur.length + par.length > limit) { out.push(cur); cur = ''; }
+    cur += (cur ? '\n\n' : '') + par;
+  }
+  if (cur) out.push(cur);
+  return out;
+}
+
+/** Вторая проверка: обороты, которых нет в словаре сторожа. */
+async function reviewRegister(text, ask) {
+  const src = String(text || '');
+  if (typeof ask !== 'function' || !src.trim()) return [];
+  const hits = [];
+  for (const chunk of chunksOf(src)) {
+    let answer = '';
+    try {
+      answer = await ask([
+        { role: 'system', content: REVIEW_TASK },
+        { role: 'user', content: chunk },
+      ]);
+    } catch (e) {
+      console.warn(`Рецензент регистра недоступен (${e.message}) — проверен только словарём`);
+      continue;   // рецензент недоступен — остаётся словарь
+    }
+    if (process.env.REGISTER_DEBUG) console.log('рецензент: ответ\n' + answer);
+    // Индексы — по всему тексту, а не по куску.
+    const got = parseReview(answer, src);
+    hits.push(...got);
+    // Ответ есть, а разобрать нечего — модель сменила формат. Молчать
+    // нельзя: на замере так терялись все находки рецензента.
+    if (!got.length && /«/.test(answer) && !/^\s*нет\b/i.test(answer)) {
+      console.warn(`Рецензент: ответ не разобран — ${answer.slice(0, 200).replace(/\s+/g, ' ')}`);
+    }
+  }
+  const own = findColloquial(src);
+  return mergeHits([], hits).filter((h) => !own.some(
+    (o) => h.index < o.index + o.match.length && o.index < h.index + h.match.length));
 }
 
 const FIX_TASK = 'Ниже предложения из научной работы (курсовой). В каждом есть '
@@ -400,13 +554,15 @@ function parseNumbered(answer) {
  * @param {function} ask (messages) => Promise<string>
  * @returns {Promise<{text, found, fixed, left: Array<{match, kind}>, changes: Array<{before, after}>}>}
  */
-async function fixRegister(text, ask) {
+async function fixRegister(text, ask, opts = {}) {
   const { lostFacts, lostRefs } = require('./facts');
   let src = String(text || '');
-  const initial = offendingSentences(src);
+  const reviewAsk = opts.reviewAsk || (opts.review ? ask : null);
+  const reviewed = reviewAsk ? await reviewRegister(src, reviewAsk) : [];
+  const initial = offendingSentences(src, reviewed);
   const found = initial.reduce((n, o) => n + o.hits.length, 0);
   if (!initial.length || typeof ask !== 'function') {
-    return { text: src, found, fixed: 0, left: initial.flatMap((o) => o.hits), changes: [] };
+    return { text: src, found, fixed: 0, left: initial.flatMap((o) => o.hits), changes: [], reviewed: reviewed.length };
   }
 
   // Пометки «[нужно проверить: …]» — обещание проверки человеком.
@@ -415,7 +571,32 @@ async function fixRegister(text, ask) {
   const marks = (t) => (String(t).match(/\[(?:нужно проверить|пример иллюстративн)[^\]]*\]/gi) || []);
   const keepsMarks = (before, after) => marks(before).every((m) => after.includes(m));
 
-  const accept = (before, after) => after
+  // Оборот, найденный рецензентом, должен уйти из фразы.
+  const reviewGone = (o, after) => o.hits.filter((h) => h.source === 'review')
+    .every((h) => !after.toLowerCase().includes(h.match.toLowerCase()));
+
+  // Канцелярит вместо разговорности — тоже порча: «осуществляется ею
+  // в узкой сфере» на замере. Новый канцелярит, которого не было, не берём.
+  const KANC = /осуществля|являет|в рамках|сопряжен|производится|данн(?:ый|ая|ое|ые) /gi;
+  const kanc = (t) => (String(t).match(KANC) || []).length;
+  const noNewKanc = (before, after) => kanc(after) <= kanc(before);
+
+  // Модель путает номера в пачке — тогда «замена» от чужого предложения.
+  // Требуем, чтобы хотя бы треть значимых слов исходной фразы осталась.
+  const stems = (t) => new Set((String(t).toLowerCase().match(/[а-яё]{5,}/g) || []).map((x) => x.slice(0, 5)));
+  const sameThought = (before, after) => {
+    const b = stems(before);
+    if (b.size < 3) return true;
+    const a = stems(after);
+    let k = 0;
+    b.forEach((x) => { if (a.has(x)) k += 1; });
+    return k / b.size >= 0.34;
+  };
+
+  const accept = (before, after, o) => after
+    && sameThought(before, after)
+    && (!o || reviewGone(o, after))
+    && noNewKanc(before, after)
     && keepsMarks(before, after)
     && !findColloquial(after).length
     && !lostFacts(before, after).length
@@ -461,7 +642,7 @@ async function fixRegister(text, ask) {
           changes.push({ before: o.sentence, after: '' });
           return;
         }
-        if (accept(o.sentence, repl) && src.includes(o.sentence)) {
+        if (accept(o.sentence, repl, o) && src.includes(o.sentence)) {
           src = src.replace(o.sentence, repl);
           changes.push({ before: o.sentence, after: repl });
         } else {
@@ -472,8 +653,14 @@ async function fixRegister(text, ask) {
     pending = still;
   }
 
-  const left = findColloquial(src).map((h) => ({ match: h.match, kind: h.kind }));
-  return { text: src, found, fixed: Math.max(0, found - left.length), left, changes };
+  const left = [
+    ...findColloquial(src),
+    ...reviewed.filter((h) => src.includes(h.match)),
+  ].map((h) => ({ match: h.match, kind: h.kind }));
+  return { text: src, found, fixed: Math.max(0, found - left.length), left, changes, reviewed: reviewed.length };
 }
 
-module.exports = { RULES, findColloquial, colloquialRate, offendingSentences, parseNumbered, fixRegister };
+module.exports = {
+  RULES, findColloquial, colloquialRate, offendingSentences, parseNumbered, fixRegister,
+  reviewRegister, parseReview, mergeHits, REVIEW_TASK,
+};

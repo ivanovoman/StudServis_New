@@ -1194,10 +1194,15 @@ async function writeFullPiece(task, ctx, send) {
     const { upstream } = await callOpenRouterWithFallback(messages);
     return readWholeAnswer(upstream);
   };
-  const reg = await fixRegister(text, askFix);
+  // Рецензент — вторая проверка моделью сверх словаря: на замере словарь
+  // видел около трети разговорных оборотов. Находки рецензента
+  // проходят те же проверки замены. REGISTER_REVIEW=0 — выключить.
+  const review = process.env.REGISTER_REVIEW !== '0' && !!askFix;
+  const reg = await fixRegister(text, askFix, { review });
   if (reg.found) {
     console.log(`Научный стиль, «${task.heading || task.title}»: найдено `
-      + `${reg.found}, исправлено ${reg.fixed}, осталось ${reg.left.length}`);
+      + `${reg.found} (рецензент ${reg.reviewed || 0}), исправлено ${reg.fixed}, `
+      + `осталось ${reg.left.length}`);
     if (send) {
       send({
         register: {
