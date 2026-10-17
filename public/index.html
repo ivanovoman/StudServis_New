@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>СЕРВИС СТУДРАБОТ</title>
+    <script src="themes.js"></script>
+    <style>
+        body { background: #0a0a0a; }
+    </style>
+</head>
+<body>
+    <script>
+        // Ретро - вступление, а не рабочее место. Случайная ретро-тема
+        // играет заставку «из прошлого в будущее» один раз за сессию и
+        // передаёт человека современному интерфейсу; всё остальное
+        // время вход ведёт прямо туда. Раньше при уже просмотренной
+        // заставке пользователь оставался в ретро-меню и работал в нём.
+        var params = new URLSearchParams(window.location.search);
+        var SEEN_KEY = "studservis_intro_seen";
+
+        // ?retro=1 - открыть ретро-меню принудительно. Нужно для
+        // отладки самих тем: их 16, и проверять их как-то надо.
+        var forceRetro = params.get("retro") === "1";
+
+        var seen = false;
+        try {
+            seen = sessionStorage.getItem(SEEN_KEY) === "1";
+        } catch (e) {
+            // Приватный режим: считаем, что заставку ещё не видели.
+        }
+
+        var intro = params.get("intro");
+
+        if (!forceRetro && (seen || intro === "off")) {
+            window.location.replace("modern.html");
+        } else {
+            // ?theme=Windows_95.html — открыть конкретную тему (для отладки)
+            var requested = params.get("theme");
+            var theme = THEMES.includes(requested)
+                ? requested
+                : THEMES[Math.floor(Math.random() * THEMES.length)];
+
+            var parts = [];
+            if (intro) parts.push("intro=" + encodeURIComponent(intro));
+            if (forceRetro) parts.push("retro=1");
+            var suffix = parts.length ? ("?" + parts.join("&")) : "";
+
+            window.location.replace("themes/" + theme + suffix);
+        }
+    </script>
+    <noscript>
+        <p style="color:#ffb000;font-family:monospace;">
+            Включите JavaScript или откройте тему напрямую из папки
+            <a href="themes/" style="color:#ffcc00;">themes/</a>.
+        </p>
+    </noscript>
+</body>
+</html>
