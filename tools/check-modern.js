@@ -51,7 +51,7 @@ function ok(cond, text) {
 
   console.log('\nКарточки меню');
   const cards = [...doc.querySelectorAll('.card')];
-  ok(cards.length === 10, `карточек на экране: ${cards.length} (ждём 10)`);
+  ok(cards.length === 11, `карточек на экране: ${cards.length} (ждём 11)`);
   const muted = cards.filter((c) => c.className.includes('muted'));
   ok(muted.length === 0, `неактивных карточек: ${muted.length} (ждём 0)`);
   const soon = [...doc.querySelectorAll('.tag.soon')];
@@ -60,9 +60,9 @@ function ok(cond, text) {
   console.log('\nОкна открываются');
   const checks = [
     [3, 'Введение', 'textarea'],
-    [5, 'Подобрать источники', 'textarea'],
-    [6, 'Оформить по ГОСТ', 'textarea'],
-    [7, 'Проверить на ИИ', 'textarea'],
+    [6, 'Подобрать источники', 'textarea'],
+    [7, 'Оформить по ГОСТ', 'textarea'],
+    [8, 'Проверить на ИИ', 'textarea'],
   ];
   for (const [idx, name, sel] of checks) {
     cards[idx - 1].dispatchEvent(new window.MouseEvent('click', { bubbles: true }));
@@ -75,18 +75,15 @@ function ok(cond, text) {
     if (x) x.dispatchEvent(new window.MouseEvent('click', { bubbles: true }));
   }
 
-  console.log('\nПункт 4: развилка способов написания');
-  // Пункт 4 больше не открывает сборку сразу: сначала выбор между
-  // работой по разделам и сборкой целиком.
+  console.log('\nПункт 4: курсовая по разделам, пункт 5: черновик целиком');
   cards[3].dispatchEvent(new window.MouseEvent('click', { bubbles: true }));
   let sheet4 = doc.querySelector('.sheet');
-  ok(sheet4.textContent.includes('По разделам'), 'предложена работа по разделам');
-  [...sheet4.querySelectorAll('button')]
-    .find((b) => b.textContent === 'Собрать целиком')
-    .dispatchEvent(new window.MouseEvent('click', { bubbles: true }));
+  ok(sheet4.querySelector('h2').textContent === 'Курсовая по разделам', 'пункт 4 открыл разделы');
+  sheet4.querySelector('.x').dispatchEvent(new window.MouseEvent('click', { bubbles: true }));
+  cards[4].dispatchEvent(new window.MouseEvent('click', { bubbles: true }));
   await new Promise((r) => setTimeout(r, 150));
   sheet4 = doc.querySelector('.sheet');
-  ok(!!sheet4.querySelector('.bar-wrap'), 'окно сборки целиком открылось');
+  ok(!!sheet4.querySelector('.bar-wrap'), 'пункт 5 сразу открыл сборку целиком');
   sheet4.querySelector('.x').dispatchEvent(new window.MouseEvent('click', { bubbles: true }));
 
   console.log('\nНастройки');
@@ -140,9 +137,9 @@ function ok(cond, text) {
     'вуз доехал до бэкенда: ' + JSON.stringify(sentBody && sentBody.settings));
 
 
-  console.log('\nПункт 5: подбор источников (живой запрос)');
+  console.log('\nПункт 6: подбор источников (живой запрос)');
   window.fetch = realFetch;
-  cards[4].dispatchEvent(new window.MouseEvent('click', { bubbles: true }));
+  cards[5].dispatchEvent(new window.MouseEvent('click', { bubbles: true }));
   sheet = doc.querySelector('.sheet');
   [...sheet.querySelectorAll('button')]
     .find((b) => b.textContent === 'Искать')
@@ -156,8 +153,8 @@ function ok(cond, text) {
   ok(!!out.querySelector('.biblio'), 'список по ГОСТ показан');
   sheet.querySelector('.x').dispatchEvent(new window.MouseEvent('click', { bubbles: true }));
 
-  console.log('\nПункт 7: детектор (живой запрос)');
-  cards[6].dispatchEvent(new window.MouseEvent('click', { bubbles: true }));
+  console.log('\nПункт 8: детектор (живой запрос)');
+  cards[7].dispatchEvent(new window.MouseEvent('click', { bubbles: true }));
   sheet = doc.querySelector('.sheet');
   // Детектор отказывается работать с короткими кусками: на паре фраз
   // частотные признаки не считаются. Даём текст нормального размера.
@@ -179,7 +176,7 @@ function ok(cond, text) {
     'оценка показана: ' + (out.textContent.match(/Машинность:\s+\d+%/) || ['нет'])[0]);
   sheet.querySelector('.x').dispatchEvent(new window.MouseEvent('click', { bubbles: true }));
 
-  console.log('\nПункт 4: сборка на смоделированном потоке');
+  console.log('\nПункт 5: сборка на смоделированном потоке');
   // Настоящая сборка идёт три минуты; здесь проверяется, что окно
   // правильно показывает ход дела — прогресс, части, провалы, итог.
   const events = [
@@ -207,11 +204,7 @@ function ok(cond, text) {
     });
   };
 
-  cards[3].dispatchEvent(new window.MouseEvent('click', { bubbles: true }));
-  sheet = doc.querySelector('.sheet');
-  [...sheet.querySelectorAll('button')]
-    .find((b) => b.textContent === 'Собрать целиком')
-    .dispatchEvent(new window.MouseEvent('click', { bubbles: true }));
+  cards[4].dispatchEvent(new window.MouseEvent('click', { bubbles: true }));
   await new Promise((r) => setTimeout(r, 150));
   sheet = doc.querySelector('.sheet');
   sheet.querySelector('textarea').value = 'Глава 1. Понятие\n1.1 Понятие\n1.2 Практика';

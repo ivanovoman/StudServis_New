@@ -11,9 +11,10 @@
     "check:modern": "node tools/check-modern.js",
     "check:entry": "node tools/check-entry.js",
     "check:account": "node tools/check-account.js",
-    "check:workbench": "node tools/check-workbench.js",
+    "check:sections": "node tools/check-sections.js",
     "check:slides": "node tools/check-slides.js",
-    "check:library": "node tools/check-library.js"
+    "check:library": "node tools/check-library.js",
+    "test": "node --test tests/"
   },
   "engines": {
     "node": ">=18"

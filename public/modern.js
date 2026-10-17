@@ -18,7 +18,7 @@
     // только на cfg.step гасила уже готовые сборку и инструменты:
     // бэкенд их умел, а карточка молчала «Скоро».
     var ready = !!(cfg.step || cfg.tool || cfg.assemble || cfg.slides
-                   || cfg.library);
+                   || cfg.library || cfg.sections);
 
     var card = document.createElement('button');
     // Класс 'muted' только приглушает вид: карточка остаётся рабочей
@@ -46,7 +46,8 @@
     card.appendChild(p);
 
     card.onclick = function () {
-      if (cfg.assemble) window.ModernSheets.openWriting();
+      if (cfg.sections) window.ModernSections.open();
+      else if (cfg.assemble) window.ModernSheets.openAssemble();
       else if (cfg.slides) window.ModernSlides.open();
       else if (cfg.library) window.ModernLibrary.open();
       else if (cfg.tool) window.ModernSheets.openTool(cfg);
@@ -272,6 +273,19 @@
           } else {
             setStatus('Готово', false);
             if (result.trim()) dl.style.display = '';
+            // Готовый план запоминаем: по нему пишется курсовая по
+            // разделам, и копировать его туда руками не нужно.
+            if (cfg.step === 'plan' && result.trim()) {
+              window.StudCore.savePlan(result, window.StudCore.getSettings().topic
+                                               || input.value.trim());
+              if (!row.querySelector('.go-sections')) {
+                var go = document.createElement('button');
+                go.className = 'btn go-sections';
+                go.textContent = 'Писать по разделам →';
+                go.onclick = function () { window.ModernSections.open(); };
+                row.insertBefore(go, status);
+              }
+            }
           }
         },
       });

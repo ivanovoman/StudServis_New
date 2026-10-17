@@ -415,7 +415,7 @@
     whole.appendChild(b2);
     body.appendChild(whole);
 
-    b1.onclick = function () { window.ModernWorkbench.open(); };
+    b1.onclick = function () { window.ModernSections.open(); };
     b2.onclick = function () { openAssemble(); };
   }
 

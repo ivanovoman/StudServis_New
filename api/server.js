@@ -12,6 +12,7 @@ const { resolveProviders, modelsFor } = require('./providers');
 const { fetchDossier, dossierBlock } = require('./dossier');
 const { findColloquial, fixRegister } = require('./register');
 const { stripDisclaimers, appendBeforeTail, fixMixedScript } = require('./cleanup');
+const { createSourcePins, pinKeys, foundFromList } = require('./worksources');
 
 const START_TIME = new Date().toISOString();
 
@@ -20,6 +21,10 @@ const START_TIME = new Date().toISOString();
 // провайдера и рвутся посреди работы. Ждущий видит своё место, а не
 // молчащий экран.
 const heavyJobs = createQueue();
+
+// Публикации, закреплённые за работой при письме по разделам: номера
+// сносок должны значить одно и то же во всех разделах. См. worksources.js.
+const sourcePins = createSourcePins();
 
 const app = express();
 app.use(express.json({ limit: '1mb' }));
@@ -1608,8 +1613,18 @@ app.post('/api/section', async (req, res) => {
   try {
     // Публикации ищем по теме работы: ссылаться нужно и в одиночном
     // разделе, иначе текст окажется без опоры на литературу.
+    //
+    // Список закрепляется за работой: раздел за разделом номера [N]
+    // должны указывать на одни и те же статьи. Раньше сюда же уходил
+    // голый массив вместо объекта с prompt_block, и модель получала
+    // «МАТЕРИАЛЫ ДЛЯ ОПОРЫ… undefined» — то есть ставила сноски на
+    // список, которого не видела.
     const topic = (settings && settings.topic) || topicFromPlan(plan);
-    const found = await fetchSources(topic);
+    const keys = pinKeys({ workId, ownerKey, topic });
+    let found = keys.map((k) => sourcePins.get(k)).find(Boolean) || null;
+    if (!found) found = foundFromList(req.body.sources);
+    if (!found) found = await fetchSources(topic);
+    if (found) keys.forEach((k) => sourcePins.set(k, found));
     const sources = found && found.sources ? found.sources : [];
     if (sources.length) send({ sources });
 
@@ -1623,7 +1638,7 @@ app.post('/api/section', async (req, res) => {
         text: String(w.text || '').slice(0, 4000),
       }));
 
-    const raw = await writeFullPiece(task, { plan, settings, done, sources, ownerKey }, send);
+    const raw = await writeFullPiece(task, { plan, settings, done, sources: found, ownerKey }, send);
     const { text: unmarked, removed: markers } = stripLibraryMarkers(raw);
     if (markers) {
       console.log(`Убрано служебных пометок материалов: ${markers}`);
@@ -1658,6 +1673,8 @@ app.post('/api/section', async (req, res) => {
       await storage.savePiece(task, text, position);
       savedId = storage.id;
     }
+    // Работа получила номер только что — закрепляем список и за ним.
+    if (found && savedId && !workId) sourcePins.set(`w:${savedId}`, found);
 
     send({
       piece: {

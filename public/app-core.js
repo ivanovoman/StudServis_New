@@ -34,30 +34,37 @@
          docTitle: 'Введение', needsSettings: true,
          placeholder: 'Вставьте план работы' },
 
-    4: { assemble: true, title: 'Написать работу',
-         short: 'По разделам с правкой или сборка целиком',
+    // Курсовая по разделам: титул, содержание, введение, главы,
+    // параграфы, заключение, список литературы — каждый раздел своей
+    // кнопкой. План берётся из пункта 2 (он сохраняется сам).
+    4: { sections: true, title: 'Курсовая по разделам',
+         short: 'Титул, содержание, главы и параграфы — каждый раздел отдельно',
          needsSettings: true },
 
-    5: { tool: 'sources', title: 'Подобрать источники',
+    5: { assemble: true, title: 'Черновик целиком',
+         short: 'Вся работа за один запуск, с ходом сборки',
+         needsSettings: true },
+
+    6: { tool: 'sources', title: 'Подобрать источники',
          short: 'Публикации из открытого доступа с проверкой ссылок',
          needsSettings: true },
 
-    6: { tool: 'gost', title: 'Оформить по ГОСТ',
+    7: { tool: 'gost', title: 'Оформить по ГОСТ',
          short: 'Поля, шрифты, нумерация, список литературы' },
 
-    7: { tool: 'detector', title: 'Проверить на ИИ',
+    8: { tool: 'detector', title: 'Проверить на ИИ',
          short: 'Оценка машинности текста и советы по правке' },
 
-    8: { step: 'speech', title: 'Речь для защиты',
+    9: { step: 'speech', title: 'Речь для защиты',
          short: 'Доклад на 7 минут и вопросы комиссии с ответами',
          docTitle: 'Речь для защиты', needsSettings: true,
          placeholder: 'Вставьте текст готовой работы' },
 
-    9: { slides: true, title: 'Презентация к защите',
-         short: 'Слайды с правкой и выгрузкой в PowerPoint',
-         needsSettings: true },
+    10: { slides: true, title: 'Презентация к защите',
+          short: 'Слайды с правкой и выгрузкой в PowerPoint',
+          needsSettings: true },
 
-    10: { library: true, title: 'Мои материалы',
+    11: { library: true, title: 'Мои материалы',
           short: 'Методички и конспекты, на которые сервис будет опираться',
           free: true },
   };
@@ -147,6 +154,11 @@
     // фиксировать тройку нельзя: курсовая бывает и двухглавой, а
     // методичка вуза может прямо требовать две.
     chapters: null,
+    // Поля титульного листа: факультет, кафедра, дисциплина, студент,
+    // группа, руководитель, город, год. Объект целиком, как его ждёт
+    // docxExport.buildTitlePage. Пустые поля в документе остаются
+    // подчёркнутым местом — придумывать фамилию руководителя нельзя.
+    titlePage: null,
   };
 
   var settings = load();
@@ -341,6 +353,62 @@
   }
 
 
+  // ----------------------------------------------- последний план
+
+  var PLAN_KEY = 'studrabots.plan';
+
+  /**
+   * Последний план работы.
+   *
+   * План — результат пункта 2, и раньше он жил только в окне этого
+   * пункта: закрыл окно — и для письма по разделам его приходилось
+   * копировать руками. Теперь готовый план запоминается сам, вместе с
+   * темой, под которую составлен.
+   */
+  function savePlan(plan, topic) {
+    var text = String(plan || '').trim();
+    if (!text) return null;
+    var rec = { plan: text, topic: String(topic || '').trim(), at: Date.now() };
+    try { localStorage.setItem(PLAN_KEY, JSON.stringify(rec)); } catch (e) { /* приватный режим */ }
+    return rec;
+  }
+
+  function getPlan() {
+    try {
+      var rec = JSON.parse(localStorage.getItem(PLAN_KEY) || 'null');
+      return rec && rec.plan ? rec : null;
+    } catch (e) {
+      return null;
+    }
+  }
+
+  /** Короткий отпечаток текста — чтобы отличать один план от другого. */
+  function textHash(text) {
+    var h = 5381;
+    var s = String(text || '');
+    for (var i = 0; i < s.length; i++) h = ((h << 5) + h + s.charCodeAt(i)) | 0;
+    return (h >>> 0).toString(36);
+  }
+
+  /**
+   * Данные титульного листа для выгрузки.
+   *
+   * Тема и вуз берутся из общих настроек, остальное — из полей титула.
+   * Поле вуза в настройках исторически совмещает вуз и кафедру
+   * («МФЮА, кафедра гражданского права»); если кафедра на титуле не
+   * задана отдельно, вуз уходит одной строкой как есть.
+   */
+  function titlePageInfo(settings, topic) {
+    settings = settings || getSettings();
+    var extra = settings.titlePage || {};
+    var info = { topic: topic || settings.topic || '', university: settings.university || '' };
+    Object.keys(extra).forEach(function (k) {
+      var v = extra[k];
+      if (v !== '' && v !== null && v !== undefined) info[k] = v;
+    });
+    return info;
+  }
+
   /**
    * Собирает .docx всей работы из её частей.
    *
@@ -351,7 +419,7 @@
    * разошлись бы — один из путей молча отдавал бы кривой файл.
    *
    * @param {Array} pieces   части работы: {kind, number, heading, text}
-   * @param {object} opts    {settings, sources, plan, topic}
+   * @param {object} opts    {settings, sources, plan, topic, bibliography}
    */
   function exportFullDocx(pieces, opts) {
     opts = opts || {};
@@ -391,10 +459,10 @@
         // стояли голые «ГЛАВА 1», «ГЛАВА 2».
         plan: opts.plan || '',
         sources: opts.sources || [],
-        titlePage: {
-          topic: topic,
-          university: settings.university || '',
-        },
+        titlePage: titlePageInfo(settings, topic),
+        // Список литературы, поправленный руками. Пустой — сервер
+        // соберёт его сам из публикаций, на которые ссылается текст.
+        bibliography: opts.bibliography || undefined,
       }),
     }).then(function (r) {
       if (!r.ok) {
@@ -426,5 +494,9 @@
     getToken: getToken,
     setToken: setToken,
     exportFullDocx: exportFullDocx,
+    savePlan: savePlan,
+    getPlan: getPlan,
+    textHash: textHash,
+    titlePageInfo: titlePageInfo,
   };
 })();
