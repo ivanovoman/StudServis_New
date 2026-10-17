@@ -245,6 +245,41 @@
     .sec-form { grid-template-columns: 1fr; }
   }
 
+  /* --- Глубокий анализ раздела --- */
+  .review:empty { display: none; }
+  .review { border: 1px solid var(--line); border-radius: 14px; padding: 14px 16px;
+    margin: 10px 0 14px; background: var(--bg); }
+  .review-head { display: flex; justify-content: space-between; align-items: center; }
+  .review-head h4 { margin: 0; font-size: 16px; }
+  .rv-metrics { display: flex; flex-wrap: wrap; gap: 6px; margin: 10px 0 4px; }
+  .rv-chip { font-size: 12px; background: var(--bg-soft); border-radius: 999px;
+    padding: 3px 10px; color: var(--text-soft); }
+  .rv-sec { margin-top: 14px; }
+  .rv-sec-h { font-size: 13px; font-weight: 600; text-transform: uppercase;
+    letter-spacing: .04em; color: var(--text-soft); margin-bottom: 6px; }
+  .rv-summary { font-size: 14px; margin: 0 0 8px; }
+  .rv-group { font-size: 12px; color: var(--text-soft); margin: 10px 0 2px; }
+  .rv-item { padding: 7px 10px; margin-bottom: 6px; border-left: 3px solid var(--line);
+    background: var(--bg-soft); border-radius: 0 8px 8px 0; }
+  .rv-item.strong { border-left-color: #d9534f; }
+  .rv-item.warn { border-left-color: var(--warn); }
+  .rv-item.info { border-left-color: var(--accent); }
+  .rv-item.sub { margin-left: 16px; padding: 5px 10px; }
+  .rv-line { display: flex; gap: 8px; align-items: flex-start; cursor: pointer; }
+  .rv-line input { width: auto; margin: 3px 0 0; flex: 0 0 auto; }
+  .rv-title { font-size: 14px; font-weight: 500; }
+  .rv-detail { font-size: 13px; color: var(--text-soft); margin-top: 3px; }
+  .rv-advice { font-size: 13px; margin-top: 3px; }
+  .rv-quotes { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; }
+  .qchip { font: inherit; font-size: 12px; text-align: left; background: var(--bg);
+    border: 1px solid var(--line); border-radius: 6px; padding: 2px 7px;
+    cursor: pointer; color: var(--text); }
+  .qchip:hover { border-color: var(--accent); }
+  .qchip.miss { opacity: .5; text-decoration: line-through; }
+  .rv-fix { margin-top: 14px; }
+  .status.warn { color: var(--warn); }
+  mark.hl { background: #ffe58a; color: #000; border-radius: 3px; padding: 0 2px; }
+
   /* --- Модальное окно --- */
   .scrim {
     position: fixed; inset: 0; z-index: 100;

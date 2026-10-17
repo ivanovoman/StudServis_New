@@ -563,7 +563,41 @@
       sources: state.sources || [],
     };
     if (state.workId) payload.workId = state.workId;
+    return streamPiece(item, '/api/section', payload);
+  }
 
+  /**
+   * Правка раздела по отмеченным замечаниям анализа: модель меняет
+   * только эти места. Прежний вариант сохраняется — его можно вернуть.
+   */
+  function revise(item, remarks) {
+    if (job) return Promise.reject('уже пишется ' + labelOf(job.id));
+    var p = state.pieces[item.position];
+    if (!p) return Promise.reject('раздел ещё не написан');
+    job = { id: item.id, status: 'Правлю по замечаниям…', from: Date.now() };
+    drawNav();
+    var settings = window.StudCore.getSettings();
+    if (!settings.topic && state.topic) settings.topic = state.topic;
+    var before = { text: p.text, chars: p.chars, edited: p.edited, at: Date.now() };
+    var payload = {
+      text: p.text,
+      remarks: remarks,
+      task: Object.assign({}, item.task, { position: item.position }),
+      plan: state.plan,
+      settings: settings,
+      ownerKey: window.StudCore.ownerKey(),
+    };
+    if (state.workId) payload.workId = state.workId;
+    return streamPiece(item, '/api/section-revise', payload).then(function () {
+      state.prev = state.prev || {};
+      state.prev[item.id] = before;
+      state.pieces[item.position].revised = remarks.length;
+      persist(state);
+    });
+  }
+
+  /** Общий разбор потока: и для письма, и для правки по замечаниям. */
+  function streamPiece(item, url, payload) {
     var tick = setInterval(function () {
       if (!job) return;
       job.clock = Math.round((Date.now() - job.from) / 1000) + ' с';
@@ -573,7 +607,7 @@
     return new Promise(function (resolve, reject) {
       var gotPiece = false;
       var lastError = '';
-      window.StudCore.stream('/api/section', payload, function (ev) {
+      window.StudCore.stream(url, payload, function (ev) {
         if (ev.sources && ev.sources.length && !(state.sources || []).length) {
           state.sources = ev.sources;
         }
@@ -637,10 +671,16 @@
     var editBtn = el('button', 'btn ghost', 'Править');
     var cancelBtn = el('button', 'btn ghost', 'Отменить правку');
     cancelBtn.style.display = 'none';
+    var analyzeBtn = el('button', 'btn ghost', 'Глубокий анализ');
+    analyzeBtn.title = 'Разбор раздела: стиль, ритм, конкретика, сноски, факты для '
+      + 'проверки, повторы, детектор ИИ и рецензия научного руководителя';
+    var undoBtn = el('button', 'btn ghost', 'Вернуть прежний вариант');
     var st = el('span', 'status');
     row.appendChild(writeBtn);
     row.appendChild(editBtn);
+    row.appendChild(analyzeBtn);
     row.appendChild(cancelBtn);
+    row.appendChild(undoBtn);
     row.appendChild(st);
     pane.appendChild(row);
 
@@ -648,6 +688,8 @@
     pane.appendChild(meta);
     var legalBox = el('div');
     pane.appendChild(legalBox);
+    var reportBox = el('div', 'review');
+    pane.appendChild(reportBox);
     var out = el('div', 'out');
     pane.appendChild(out);
     var editor = el('textarea', 'sec-editor');
@@ -656,6 +698,7 @@
     pane.appendChild(editor);
 
     var editing = false;
+    var lastSig = '';
 
     function refresh(final) {
       var p = state.pieces[item.position];
@@ -664,6 +707,11 @@
       writeBtn.disabled = !!job || editing;
       editBtn.style.display = p ? '' : 'none';
       editBtn.disabled = mine;
+      analyzeBtn.style.display = p && !editing ? '' : 'none';
+      analyzeBtn.disabled = !!reviewRuns[item.id] || mine;
+      analyzeBtn.textContent = reviewRuns[item.id] ? 'Анализирую…'
+        : (state.reviews && state.reviews[item.id] ? 'Анализ заново' : 'Глубокий анализ');
+      undoBtn.style.display = p && state.prev && state.prev[item.id] && !editing && !job ? '' : 'none';
       if (mine) st.textContent = job.status + (job.clock ? ' — ' + job.clock : '');
       else if (job) st.textContent = 'Сейчас пишется ' + labelOf(job.id) + ' — дождитесь';
       else if (final !== true && !editing) st.textContent = st.dataset.keep || '';
@@ -679,7 +727,18 @@
           + lg.unclear.join('; ')));
       }
 
-      if (editing) return;
+      if (editing) { reportBox.style.display = 'none'; lastSig = ''; return; }
+      reportBox.style.display = '';
+      // Перерисовываем текст и отчёт, только когда в них что-то
+      // поменялось: refresh зовётся раз в секунду, пока идёт любое
+      // задание, и иначе сбрасывал бы подсветку цитаты.
+      var rep = state.reviews && state.reviews[item.id];
+      var sig = [p ? p.text.length + ':' + p.at + ':' + p.edited : '-',
+        rep ? [rep.at, rep.stage, !!rep.local, !!rep.detector, !!rep.legal, !!rep.review, rep.reviewError, rep.fixError].join('/') : '-',
+        job ? job.id + job.status : '-'].join('|');
+      if (sig === lastSig) return;
+      lastSig = sig;
+      renderReport(item, reportBox, out);
       if (p) {
         var vs = L.volumeState(kind, p.chars);
         meta.textContent = fmt(p.chars) + ' знаков без пробелов'
@@ -746,6 +805,26 @@
       saveEdit(item, p, st);
     };
 
+    analyzeBtn.onclick = function () {
+      analyze(item);
+      refresh();
+    };
+
+    undoBtn.onclick = function () {
+      var prev = state.prev && state.prev[item.id];
+      var p = state.pieces[item.position];
+      if (!prev || !p) return;
+      p.text = prev.text;
+      p.chars = prev.chars;
+      p.edited = true;
+      p.revised = 0;
+      delete state.prev[item.id];
+      persist(state);
+      refresh();
+      drawNav();
+      saveEdit(item, p, st);
+    };
+
     cancelBtn.onclick = function () {
       editing = false;
       editor.style.display = 'none';
@@ -756,6 +835,293 @@
 
     refresh();
     stepper(item);
+  }
+
+  // -------------------------------------------- глубокий анализ
+
+  var reviewRuns = {};   // id -> true, пока идёт анализ
+
+  /**
+   * Запустить глубокий анализ раздела. Результат копится в
+   * state.reviews[id] по мере прихода событий и переживает закрытие
+   * окна. Отпечаток текста запоминается: если раздел потом правили,
+   * отчёт помечается устаревшим.
+   */
+  function analyze(item) {
+    var p = state.pieces[item.position];
+    if (!p || reviewRuns[item.id]) return;
+    reviewRuns[item.id] = true;
+    state.reviews = state.reviews || {};
+    var rep = state.reviews[item.id] = {
+      hash: window.StudCore.textHash(p.text), at: Date.now(),
+      local: null, detector: null, legal: null, review: null,
+      reviewError: '', stage: 'Проверяю…',
+    };
+    var others = writableItems()
+      .filter(function (i) { return i.id !== item.id && state.pieces[i.position]; })
+      .map(function (i) {
+        var q = state.pieces[i.position];
+        return { heading: q.heading || i.label, text: q.text };
+      });
+    var settings = window.StudCore.getSettings();
+    if (!settings.topic && state.topic) settings.topic = state.topic;
+
+    window.StudCore.stream('/api/section-review', {
+      text: p.text,
+      task: Object.assign({}, item.task, { kind: L.pieceKind(item) }),
+      plan: state.plan,
+      settings: settings,
+      sources: state.sources || [],
+      others: others,
+    }, function (ev) {
+      if (ev.local) rep.local = ev.local;
+      if (ev.detector) rep.detector = ev.detector;
+      if (ev.legal) rep.legal = ev.legal;
+      if (ev.queued) rep.stage = ev.queued.message;
+      if (ev.reviewing) rep.stage = 'Научный руководитель читает раздел…';
+      if (ev.review) { rep.review = ev.review; rep.stage = ''; }
+      if (ev.reviewError) { rep.reviewError = ev.reviewError; rep.stage = ''; }
+      if (ev.error) { rep.reviewError = ev.error; rep.stage = ''; }
+      persist(state);
+      if (paneRefresh) paneRefresh();
+    }, function (err) {
+      delete reviewRuns[item.id];
+      if (err) rep.reviewError = 'Анализ прерван: ' + err;
+      rep.stage = '';
+      persist(state);
+      if (paneRefresh) paneRefresh();
+    });
+  }
+
+  /** Подсветить фрагмент в тексте раздела и прокрутить к нему. */
+  function highlight(out, text, quote) {
+    var q = String(quote || '').replace(/…$/, '').trim();
+    if (!q) return false;
+    var norm = function (x) { return x.toLowerCase().replace(/ё/g, 'е'); };
+    var at = norm(text).indexOf(norm(q));
+    if (at < 0) return false;
+    out.textContent = '';
+    out.appendChild(document.createTextNode(text.slice(0, at)));
+    var mark = el('mark', 'hl', text.slice(at, at + q.length));
+    out.appendChild(mark);
+    out.appendChild(document.createTextNode(text.slice(at + q.length)));
+    out.style.display = '';
+    if (mark.scrollIntoView) mark.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    return true;
+  }
+
+  /**
+   * Отчёт анализа. Каждое замечание с советом можно отметить галочкой
+   * и отправить на точечную правку. По умолчанию отмечены рецензия и
+   * серьёзные находки — то, что научный руководитель точно заметит.
+   */
+  function renderReport(item, box, out) {
+    var rep = state.reviews && state.reviews[item.id];
+    box.textContent = '';
+    if (!rep) return;
+    var p = state.pieces[item.position];
+    if (!p) return;
+    var text = p.text;
+    var stale = rep.hash !== window.StudCore.textHash(text);
+    var picks = [];   // { box: checkbox, remark: {title, quote, advice} }
+
+    var head = el('div', 'review-head');
+    head.appendChild(el('h4', '', 'Глубокий анализ'));
+    var close = el('button', 'x', '\u2715');
+    close.title = 'Скрыть отчёт';
+    close.onclick = function () { delete state.reviews[item.id]; persist(state); renderReport(item, box, out); };
+    head.appendChild(close);
+    box.appendChild(head);
+    if (stale) {
+      box.appendChild(el('div', 'warn-line', 'Текст изменился после анализа — '
+        + 'цитаты могут не найтись. Запустите анализ заново.'));
+    }
+
+    function quoteChip(q, parent) {
+      var c = el('button', 'qchip', '«' + q + '»');
+      c.type = 'button';
+      c.title = 'Показать в тексте';
+      c.onclick = function () {
+        if (!highlight(out, text, q)) c.classList.add('miss');
+      };
+      parent.appendChild(c);
+    }
+
+    function remarkRow(parent, level, remark, opts) {
+      opts = opts || {};
+      var row = el('div', 'rv-item ' + (level || 'info'));
+      var line = el('label', 'rv-line');
+      if (remark.advice || opts.forceCheck) {
+        var cb = el('input');
+        cb.type = 'checkbox';
+        var key = remark.title + '|' + (remark.quote || '');
+        rep.picks = rep.picks || {};
+        cb.checked = key in rep.picks ? rep.picks[key] : !!opts.checked;
+        cb.onchange = function () {
+          rep.picks[key] = cb.checked;
+          persist(state);
+          updateFix();
+        };
+        line.appendChild(cb);
+        picks.push({ box: cb, remark: remark });
+      }
+      line.appendChild(el('span', 'rv-title', opts.label || remark.title));
+      row.appendChild(line);
+      if (opts.detail) row.appendChild(el('div', 'rv-detail', opts.detail));
+      var quotes = opts.quotes || (remark.quote ? [remark.quote] : []);
+      if (quotes.length) {
+        var qs = el('div', 'rv-quotes');
+        quotes.forEach(function (q) { quoteChip(q, qs); });
+        row.appendChild(qs);
+      }
+      if (remark.advice) row.appendChild(el('div', 'rv-advice', '→ ' + remark.advice));
+      parent.appendChild(row);
+    }
+
+    // Показатели одной строкой.
+    if (rep.local) {
+      var m = rep.local.metrics;
+      var chips = el('div', 'rv-metrics');
+      [
+        fmt(m.chars) + ' зн. (норма ' + fmt(m.target.min) + '–' + fmt(m.target.max) + ')',
+        'предложений: ' + m.sentences,
+        'слов в предложении: ~' + m.medianWords,
+        'разброс длины: ' + String(m.cv).replace('.', ','),
+        'цифр на 1000 зн.: ' + String(m.digitsPer1000).replace('.', ','),
+        'ссылок: ' + m.refs + (m.sources ? ' на ' + m.refsUnique + ' из ' + m.sources + ' источн.' : ''),
+      ].forEach(function (t) { chips.appendChild(el('span', 'rv-chip', t)); });
+      box.appendChild(chips);
+    }
+
+    // Рецензия научного руководителя.
+    var sec = el('div', 'rv-sec');
+    sec.appendChild(el('div', 'rv-sec-h', 'Рецензия научного руководителя'));
+    if (rep.review) {
+      if (rep.review.summary) sec.appendChild(el('p', 'rv-summary', rep.review.summary));
+      sec.appendChild(el('div', 'hint', 'Рецензию пишет модель: её замечания о фактах '
+        + 'и реквизитах тоже сверяйте по первоисточнику.'));
+      rep.review.items.forEach(function (it) {
+        remarkRow(sec, 'warn', { title: it.title, quote: it.quoteFound ? it.quote : '', advice: it.advice },
+          { checked: true, forceCheck: true,
+            detail: it.quote && !it.quoteFound ? 'Фрагмент: «' + it.quote + '» (дословно в тексте не найден)' : '' });
+      });
+      if (!rep.review.items.length) sec.appendChild(el('div', 'ok-line', 'Замечаний нет.'));
+    } else if (rep.reviewError) {
+      sec.appendChild(el('div', 'warn-line', rep.reviewError));
+    } else {
+      sec.appendChild(el('div', 'hint', rep.stage || 'Ждёт очереди…'));
+    }
+    box.appendChild(sec);
+
+    // Проверки кодом.
+    if (rep.local) {
+      var sec2 = el('div', 'rv-sec');
+      sec2.appendChild(el('div', 'rv-sec-h', 'Проверки'));
+      if (!rep.local.findings.length) {
+        sec2.appendChild(el('div', 'ok-line', 'Объём, стиль, ритм, сноски и повторы — без замечаний.'));
+      }
+      rep.local.findings.forEach(function (f) {
+        var group = el('div', 'rv-group', f.group);
+        sec2.appendChild(group);
+        if (f.items && f.items.length) {
+          // Разговорные обороты — каждый своей строкой со своей подсказкой.
+          var wrap = el('div', 'rv-item ' + f.level);
+          wrap.appendChild(el('div', 'rv-title', f.title));
+          if (f.detail) wrap.appendChild(el('div', 'rv-detail', f.detail));
+          sec2.appendChild(wrap);
+          f.items.forEach(function (it) {
+            remarkRow(sec2, 'sub', {
+              title: '«' + it.quote + '» — ' + it.kind, quote: it.quote,
+              advice: 'Заменить: ' + it.advice,
+            }, { checked: f.level === 'strong', quotes: [it.quote], label: it.kind });
+          });
+          return;
+        }
+        remarkRow(sec2, f.level, {
+          title: f.title, quote: (f.quotes || [])[0] || '', advice: f.advice || '',
+        }, { checked: f.level === 'strong', detail: f.detail, quotes: f.quotes || [] });
+      });
+      box.appendChild(sec2);
+    }
+
+    // Детектор ИИ.
+    if (rep.detector) {
+      var sec3 = el('div', 'rv-sec');
+      sec3.appendChild(el('div', 'rv-sec-h', 'Детектор ИИ'));
+      var d = rep.detector;
+      if (!d.available) {
+        sec3.appendChild(el('div', 'hint', 'Недоступен' + (d.error ? ': ' + d.error : '')));
+      } else {
+        sec3.appendChild(el('div', 'hint', 'Машинность: ' + Math.round((d.p_ai || 0) * 100)
+          + ' % — ориентир, а не приговор: на текстах самого автора детектор ошибается.'));
+        if (d.clean) sec3.appendChild(el('div', 'ok-line', 'Текст держится в диапазоне авторского стиля.'));
+        (d.findings || []).forEach(function (f) {
+          remarkRow(sec3, f.reliability === 'сильный' ? 'warn' : 'info',
+            { title: f.title, advice: f.advice }, { checked: false });
+        });
+      }
+      box.appendChild(sec3);
+    }
+
+    // Ссылки на закон.
+    if (rep.legal && !rep.legal.unavailable && rep.legal.checked) {
+      var sec4 = el('div', 'rv-sec');
+      sec4.appendChild(el('div', 'rv-sec-h', 'Ссылки на закон'));
+      var wrong = rep.legal.wrong || [];
+      var unclear = rep.legal.unclear || [];
+      sec4.appendChild(el('div', wrong.length ? 'warn-line' : 'ok-line',
+        'Проверено ссылок: ' + rep.legal.checked + (wrong.length ? ', с ошибкой: ' + wrong.length : ', ошибок нет')));
+      wrong.forEach(function (w) {
+        remarkRow(sec4, 'strong', { title: 'Ссылка не сходится с текстом закона: ' + w.label,
+          quote: w.label, advice: w.note || 'Сверить с текстом закона и исправить номер статьи.' },
+          { checked: true });
+      });
+      unclear.forEach(function (w) {
+        remarkRow(sec4, 'info', { title: 'Не удалось проверить: ' + w.label, advice: '' }, {});
+      });
+      box.appendChild(sec4);
+    }
+
+    // Правка по отмеченному.
+    var fixRow = el('div', 'row rv-fix');
+    var fixBtn = el('button', 'btn', 'Исправить отмеченное');
+    var fixSt = el('span', 'status');
+    fixRow.appendChild(fixBtn);
+    fixRow.appendChild(fixSt);
+    box.appendChild(fixRow);
+    box.appendChild(el('div', 'hint', 'Модель поправит только отмеченные места, '
+      + 'остальной текст останется как есть. Если раздел заметно сократится или '
+      + 'пропадут сноски, правка не примется. Прежний вариант можно будет вернуть.'));
+
+    function chosen() {
+      return picks.filter(function (x) { return x.box.checked; }).map(function (x) { return x.remark; });
+    }
+    function updateFix() {
+      var n = chosen().length;
+      fixBtn.textContent = 'Исправить отмеченное' + (n ? ' (' + n + ')' : '');
+      fixBtn.disabled = !n || !!job || stale;
+    }
+    updateFix();
+    if (job && job.id === item.id) fixSt.textContent = job.status;
+    else if (rep.fixError) { fixSt.textContent = rep.fixError; fixSt.classList.add('warn'); }
+
+    fixBtn.onclick = function () {
+      var remarks = chosen();
+      if (!remarks.length) return;
+      fixBtn.disabled = true;
+      rep.fixError = '';
+      revise(item, remarks).then(function () {
+        // Отчёт относился к прежнему тексту — убираем, чтобы не путал.
+        delete state.reviews[item.id];
+        persist(state);
+        if (paneRefresh) paneRefresh(true);
+      }, function (err) {
+        rep.fixError = String(err);
+        persist(state);
+        if (paneRefresh) paneRefresh();
+      });
+      if (paneRefresh) paneRefresh();
+    };
   }
 
   /** Правку — на сервер той же позицией, чтобы она попала в «Мои работы». */

@@ -15,6 +15,7 @@ const path = require('path');
 const fs = require('fs');
 const { JSDOM } = require('jsdom');
 const { parseOutline, buildQueue } = require('../api/outline');
+const { localChecks, parseReview } = require('../api/textreview');
 
 function ok(cond, text) {
   console.log((cond ? '  ✓ ' : '  ✗ ') + text);
@@ -94,6 +95,24 @@ const SOURCES = [
         }, 5)) }) },
       });
     }
+    if (url === '/api/section-review') {
+      sent.review = body;
+      return sse([
+        { local: localChecks(body.text, { kind: body.task.kind, sources: body.sources, others: body.others }) },
+        { detector: { available: true, p_ai: 0.31, clean: false,
+          findings: [{ title: 'Ровный ритм', advice: 'Чередовать длину фраз', reliability: 'сильный' }] } },
+        { legal: { checked: 2, wrong: [{ label: 'ст. 999 НК РФ', note: 'такой статьи нет' }], unclear: [] } },
+        { reviewing: true },
+        { review: parseReview('ОЦЕНКА: Логично, но мало практики.\nЗАМЕЧАНИЕ: Нет позиции судов\n'
+          + 'ЦИТАТА: «Исправленный текст»\nСОВЕТ: Добавить позицию ВС РФ', body.text) },
+      ]);
+    }
+    if (url === '/api/section-revise') {
+      sent.revise = body;
+      const text = body.text + ' Позиция ВС РФ [1].';
+      return sse([{ piece: { kind: body.task.kind, number: body.task.number, heading: body.task.heading,
+        text, chars: text.replace(/\s/g, '').length }, workId: 42, revised: body.remarks.length }]);
+    }
     if (url === '/api/v1/works/42/pieces') { sent.pieces.push(body); return json({ ok: true }); }
     if (url === '/api/export-docx-full') {
       sent.docx = body;
@@ -101,6 +120,17 @@ const SOURCES = [
     }
     return json({});
   };
+  function sse(events) {
+    const lines = events.map((e) => 'data: ' + JSON.stringify(e) + '\n').concat(['data: [DONE]\n']);
+    let i = 0;
+    const enc = new TextEncoder();
+    return Promise.resolve({
+      ok: true,
+      body: { getReader: () => ({ read: () => new Promise((r) => setTimeout(() => {
+        r(i < lines.length ? { done: false, value: enc.encode(lines[i++]) } : { done: true });
+      }, 5)) }) },
+    });
+  }
   window.URL.createObjectURL = () => 'blob:x';
   window.URL.revokeObjectURL = () => {};
   window.HTMLAnchorElement.prototype.click = function () {};
@@ -171,6 +201,52 @@ const SOURCES = [
   await wait(30);
   ok(sent.pieces.length === 1 && sent.pieces[0].position === 1, 'правка ушла на сервер той же позицией');
   ok(/правлено вручную/.test(pane.querySelector('.sec-meta').textContent), 'отмечено «правлено вручную»');
+
+  console.log('\nГлубокий анализ');
+  pane = sheet.querySelector('.sec-pane');
+  const an = btn(pane, 'Глубокий анализ');
+  ok(!!an, 'рядом с «Переписать» и «Править» есть «Глубокий анализ»');
+  click(an);
+  await wait(150);
+  ok(sent.review && sent.review.text === 'Исправленный текст [1].', 'на анализ ушёл текущий текст раздела');
+  ok(sent.review && sent.review.task.kind === 'section' && Array.isArray(sent.review.sources), 'с видом раздела и источниками');
+  pane = sheet.querySelector('.sec-pane');
+  const rv = pane.querySelector('.review');
+  ok(/Рецензия научного руководителя/.test(rv.textContent) && /мало практики/.test(rv.textContent), 'рецензия показана');
+  ok(/Меньше нормы/.test(rv.textContent), 'проверки кодом показаны (объём)');
+  ok(/Машинность: 31/.test(rv.textContent), 'детектор показан');
+  ok(/ст\. 999 НК РФ/.test(rv.textContent), 'ошибочная ссылка на закон показана');
+  ok(rv.querySelectorAll('.rv-metrics .rv-chip').length >= 5, 'показатели одной строкой');
+  const chip = [...rv.querySelectorAll('.qchip')].find((c) => c.textContent === '«Исправленный текст»');
+  click(chip);
+  ok(pane.querySelector('.out mark.hl') && pane.querySelector('.out mark.hl').textContent === 'Исправленный текст',
+    'клик по цитате подсвечивает её в тексте');
+  const checks = [...rv.querySelectorAll('.rv-line input[type=checkbox]')];
+  const checked = checks.filter((c) => c.checked).length;
+  ok(checked >= 2, `по умолчанию отмечены рецензия и серьёзное: ${checked} из ${checks.length}`);
+  const fix = btn(rv, 'Исправить отмеченное');
+  ok(fix && fix.textContent === `Исправить отмеченное (${checked})`, 'счётчик на кнопке правки: ' + (fix && fix.textContent));
+  // Снимаем одну галочку — отметка должна пережить перерисовку.
+  checks[0].checked = false;
+  checks[0].dispatchEvent(new window.Event('change', { bubbles: true }));
+  click(navBtn('s1.2'));
+  click(navBtn('s1.1'));
+  pane = sheet.querySelector('.sec-pane');
+  const checks2 = [...pane.querySelectorAll('.review .rv-line input[type=checkbox]')];
+  ok(checks2[0] && checks2[0].checked === false, 'снятая галочка пережила переход между разделами');
+  click(btn(pane.querySelector('.review'), 'Исправить отмеченное'));
+  await wait(120);
+  ok(sent.revise && sent.revise.remarks.length === checked - 1, 'на правку ушли отмеченные замечания: ' + (sent.revise && sent.revise.remarks.length));
+  ok(sent.revise && sent.revise.task.position === 1 && sent.revise.text === 'Исправленный текст [1].', 'с позицией и текущим текстом');
+  pane = sheet.querySelector('.sec-pane');
+  ok(pane.querySelector('.out').textContent.endsWith('Позиция ВС РФ [1].'), 'исправленный текст показан');
+  ok(!pane.querySelector('.review .rv-sec'), 'отчёт к прежнему тексту убран');
+  const undo = btn(pane, 'Вернуть прежний вариант');
+  ok(undo && undo.style.display === '', 'можно вернуть прежний вариант');
+  click(undo);
+  await wait(20);
+  ok(pane.querySelector('.out').textContent === 'Исправленный текст [1].', 'прежний вариант вернулся');
+  ok(btn(pane, 'Вернуть прежний вариант').style.display === 'none', 'кнопка возврата скрылась');
 
   console.log('\nГлава 2 целиком');
   click(navBtn('ch2'));

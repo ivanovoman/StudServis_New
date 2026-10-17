@@ -13,6 +13,7 @@ const { fetchDossier, dossierBlock } = require('./dossier');
 const { findColloquial, fixRegister } = require('./register');
 const { stripDisclaimers, appendBeforeTail, fixMixedScript } = require('./cleanup');
 const { createSourcePins, pinKeys, foundFromList } = require('./worksources');
+const { localChecks, parseReview, REVIEW_PROMPT, reviseMessages, rejectRevision } = require('./textreview');
 
 const START_TIME = new Date().toISOString();
 
@@ -1718,6 +1719,199 @@ app.get('/api/health', (req, res) => {
 // Скачивание текста с ЛЮБОГО шага протокола как .docx — план, введение,
 // план раздела, текст раздела, заключение и т.д. Используется на каждом
 // экране, где появляется кнопка "Скачать .docx".
+/**
+ * Глубокий анализ раздела. См. api/textreview.js.
+ *
+ * Отвечает потоком, по мере готовности: проверки кодом приходят сразу,
+ * детектор и проверка ссылок на закон — через секунды, рецензия
+ * модели — последней (она ждёт общей очереди к провайдеру).
+ *
+ * Анализ бесплатный: он ничего не пишет, а только показывает, что
+ * поправить. Бесплатные функции заказчик просил не ограничивать.
+ */
+app.post('/api/section-review', async (req, res) => {
+  const { text, task, plan, settings, sources, others } = req.body || {};
+  const src = String(text || '');
+  if (src.replace(/\s/g, '').length < 300) {
+    return res.status(400).json({ error: 'Текст раздела слишком короткий для анализа.' });
+  }
+  if (src.length > 60000) {
+    return res.status(400).json({ error: 'Слишком длинный текст: анализ рассчитан на один раздел.' });
+  }
+
+  res.writeHead(200, {
+    'Content-Type': 'text/event-stream; charset=utf-8',
+    'Cache-Control': 'no-cache',
+    Connection: 'keep-alive',
+  });
+  let closed = false;
+  res.on('close', () => { closed = true; });
+  const send = (obj) => { if (!closed) res.write(`data: ${JSON.stringify(obj)}\n\n`); };
+  const t = task || {};
+  const heading = t.heading || t.title || '';
+
+  // 1. Проверки кодом — мгновенно.
+  const local = localChecks(src, {
+    kind: t.kind, heading, brief: t.brief,
+    sources: Array.isArray(sources) ? sources : [],
+    others: (Array.isArray(others) ? others : []).slice(0, 20)
+      .map((o) => ({ heading: String((o && o.heading) || ''), text: String((o && o.text) || '').slice(0, 12000) })),
+  });
+  send({ local });
+
+  // 2. Детектор и ссылки на закон — параллельно, у них свои сервисы.
+  const detector = fetch(`${PY_BACKEND}/api/v1/humanizer/analyze`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ text: src }),
+    signal: AbortSignal.timeout(25000),
+  })
+    .then((r) => (r.ok ? r.json() : { available: false, error: `бэкенд ответил ${r.status}` }))
+    .catch((e) => ({ available: false, error: e.message }))
+    .then((d) => send({ detector: {
+      available: d.available !== false,
+      error: d.error,
+      p_ai: d.p_ai,
+      p_ai_note: d.p_ai_note,
+      clean: d.clean,
+      findings: (d.findings || []).slice(0, 10),
+    } }));
+  const legal = checkLegalRefs(src).then((l) => send({ legal: l || { unavailable: true } }));
+  await Promise.all([detector, legal]);
+
+  // 3. Рецензия модели — в общей очереди к провайдеру.
+  if (req.body.deep === false || closed) {
+    res.write('data: [DONE]\n\n');
+    return res.end();
+  }
+  let release = null;
+  try {
+    release = await heavyJobs.acquire((place, total) => {
+      send({ queued: { place, total, message: place === 1
+        ? 'Рецензия: впереди одна задача — начнём, как только она закончится.'
+        : `Рецензия: вы ${place}-й в очереди из ${total}.` } });
+    });
+    if (closed) throw new Error('клиент ушёл');
+    send({ reviewing: true });
+    const topic = (settings && settings.topic) || topicFromPlan(plan || '');
+    const messages = [
+      { role: 'system', content: REVIEW_PROMPT },
+      { role: 'user', content: `Тема работы: ${topic || '—'}\n\n`
+        + `План работы:\n${String(plan || '').slice(0, 4000)}\n\n`
+        + `Раздел: ${heading || '—'}\n`
+        + (t.brief ? `Что обещано в плане: ${t.brief}\n` : '')
+        + `\nТЕКСТ РАЗДЕЛА:\n${src}` },
+    ];
+    const { upstream } = await callOpenRouterWithFallback(messages);
+    const answer = await readWholeAnswer(upstream);
+    const review = parseReview(answer, src);
+    if (!review.items.length && !review.summary) {
+      send({ reviewError: 'Рецензент ответил не по формату — попробуйте ещё раз.' });
+    } else {
+      send({ review });
+    }
+  } catch (e) {
+    send({ reviewError: `Рецензия не получилась: ${e.message}` });
+  } finally {
+    if (release) release();
+  }
+  res.write('data: [DONE]\n\n');
+  res.end();
+});
+
+/**
+ * Правка раздела по отмеченным замечаниям анализа.
+ *
+ * В отличие от «Переписать», раздел не пишется заново: модель меняет
+ * только места с замечаниями. Сервер сверяет результат — если раздел
+ * заметно сократился или пропали сноски, правка отклоняется, и у
+ * пользователя остаётся прежний текст.
+ */
+app.post('/api/section-revise', async (req, res) => {
+  const { text, remarks, task, plan, settings, workId, ownerKey } = req.body || {};
+  const src = String(text || '');
+  const list = (Array.isArray(remarks) ? remarks : []).slice(0, 15).map((r) => ({
+    title: String((r && r.title) || '').slice(0, 400),
+    quote: String((r && r.quote) || '').slice(0, 400),
+    advice: String((r && r.advice) || '').slice(0, 600),
+  })).filter((r) => r.title || r.advice);
+  if (src.replace(/\s/g, '').length < 300) {
+    return res.status(400).json({ error: 'Текст раздела слишком короткий.' });
+  }
+  if (!list.length) {
+    return res.status(400).json({ error: 'Отметьте хотя бы одно замечание.' });
+  }
+  if (!task || !task.kind) {
+    return res.status(400).json({ error: 'Не указано, какой раздел править.' });
+  }
+
+  const access = await spendWork(req.headers.authorization);
+  if (!access.allowed) {
+    return res.status(402).json({ error: access.message || 'Нужна оплата.', reason: access.reason });
+  }
+
+  res.writeHead(200, {
+    'Content-Type': 'text/event-stream; charset=utf-8',
+    'Cache-Control': 'no-cache',
+    Connection: 'keep-alive',
+  });
+  const send = (obj) => res.write(`data: ${JSON.stringify(obj)}\n\n`);
+  let release = null;
+  let ok = false;
+  try {
+    release = await heavyJobs.acquire((place, total) => {
+      send({ queued: { place, total, message: place === 1
+        ? 'Впереди одна работа — начнём, как только она закончится.'
+        : `Вы ${place}-й в очереди из ${total}.` } });
+    });
+    const heading = task.heading || task.title || '';
+    const topic = (settings && settings.topic) || topicFromPlan(plan || '');
+    const { upstream } = await callOpenRouterWithFallback(
+      reviseMessages({ text: src, remarks: list, heading, topic }));
+    const raw = await readWholeAnswer(upstream);
+    const cleaned = stripDisclaimers(fixMixedScript(raw).text).text
+      .replace(/^\s*#{0,4}\s*\d+(?:\.\d+)*\.?\s+[^\n]{0,200}\n+/, (m) => (
+        heading && m.toLowerCase().includes(String(heading).toLowerCase().slice(0, 20)) ? '' : m));
+    const { text: out } = fixHybrids(stripLibraryMarkers(cleaned).text);
+
+    const why = rejectRevision(src, out, list);
+    if (why) {
+      send({ error: `Правка отклонена: ${why}. Текст раздела не изменён.` });
+    } else {
+      const legalRes = await checkLegalRefs(out);
+      if (legalRes && (legalRes.wrong.length || legalRes.unclear.length)) {
+        send({ legal: { heading, checked: legalRes.checked, wrong: legalRes.wrong, unclear: legalRes.unclear } });
+      }
+      let savedId = workId || null;
+      if (ownerKey) {
+        const storage = createWorkStorage(ownerKey, settings, plan);
+        if (workId) storage.id = workId;
+        else await storage.start();
+        const position = Number.isInteger(task.position) ? task.position : null;
+        await storage.savePiece(task, out, position);
+        savedId = storage.id;
+      }
+      send({
+        piece: {
+          kind: task.kind, number: task.number || null, heading,
+          chapterTitle: task.chapterTitle || undefined,
+          text: out, chars: out.replace(/\s/g, '').length,
+        },
+        workId: savedId,
+        revised: list.length,
+      });
+      ok = true;
+    }
+  } catch (e) {
+    send({ error: e.message });
+  } finally {
+    if (release) release();
+    if (!ok && access.reason === 'spent') await refundWork(req.headers.authorization);
+  }
+  res.write('data: [DONE]\n\n');
+  res.end();
+});
+
 app.post('/api/export-docx', async (req, res) => {
   try {
     const {
