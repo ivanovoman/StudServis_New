@@ -165,6 +165,31 @@
     out.className = 'out';
     body.appendChild(out);
 
+    // Сверка реквизитов: номера статей и законов модель пишет по памяти
+    // и путает (в плане об ипотеке был «ФЗ-328 „О ЦФА“» вместо 259-ФЗ).
+    var legalBox = document.createElement('div');
+    legalBox.className = 'sources warn';
+    legalBox.style.display = 'none';
+    body.appendChild(legalBox);
+
+    function renderLegal(check) {
+      var bad = (check.references || []).filter(function (r) {
+        return r.status === 'mismatch' || r.status === 'missing';
+      });
+      legalBox.textContent = '';
+      if (!bad.length) { legalBox.style.display = 'none'; return; }
+      var h = document.createElement('h4');
+      h.textContent = 'Проверьте реквизиты (' + bad.length + ')';
+      legalBox.appendChild(h);
+      bad.forEach(function (r) {
+        var d = document.createElement('div');
+        d.className = 'warn-line';
+        d.textContent = '• ' + r.label + ' — ' + (r.note || 'не совпадает с первоисточником');
+        legalBox.appendChild(d);
+      });
+      legalBox.style.display = '';
+    }
+
     var errBox = null;
     var result = '';
     var busy = false;
@@ -232,6 +257,7 @@
       out.textContent = '';
       dl.style.display = 'none';
       sources.style.display = 'none';
+      legalBox.style.display = 'none';
       if (errBox) { errBox.remove(); errBox = null; }
       run.disabled = true;
       // До первой буквы ответа проходит 15-40 секунд. Показываем этап
@@ -259,6 +285,7 @@
             renderSources(ev.sources);
             if (!result) { waitStage = 'Источники найдены, думает модель'; waitFrom = Date.now(); showWait(); }
           } else if (ev.notice) renderNotice(ev.notice);
+          else if (ev.legal) renderLegal(ev.legal);
         },
         onDone: function (err) {
           busy = false;

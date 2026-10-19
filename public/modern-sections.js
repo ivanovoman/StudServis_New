@@ -155,7 +155,7 @@
     fetch('/api/outline', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ plan: plan }),
+      body: JSON.stringify({ plan: plan, settings: window.StudCore.getSettings() }),
     })
       .then(function (r) {
         return r.json().then(function (d) {

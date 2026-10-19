@@ -154,6 +154,9 @@
     // фиксировать тройку нельзя: курсовая бывает и двухглавой, а
     // методичка вуза может прямо требовать две.
     chapters: null,
+    // Объём работы в страницах (null — не задан). По нему считается
+    // число параграфов в плане.
+    pages: null,
     // Поля титульного листа: факультет, кафедра, дисциплина, студент,
     // группа, руководитель, город, год. Объект целиком, как его ждёт
     // docxExport.buildTitlePage. Пустые поля в документе остаются
@@ -256,7 +259,7 @@
               var parsed = JSON.parse(data);
               if (parsed.error) { opts.onDone(parsed.error); return; }
               if (parsed.delta && opts.onDelta) opts.onDelta(parsed.delta);
-              if (opts.onEvent && (parsed.sources || parsed.notice)) {
+              if (opts.onEvent && (parsed.sources || parsed.notice || parsed.legal)) {
                 opts.onEvent(parsed);
               }
             } catch (e) {

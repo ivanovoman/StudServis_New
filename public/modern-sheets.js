@@ -123,6 +123,12 @@
     });
     field(body, 'Число глав', chapWrap);
 
+    // От объёма зависит число параграфов: на 25 страниц план из девяти
+    // параграфов не помещается — каждый выйдет по две страницы.
+    var pages = field(body, 'Объём работы, страниц (без приложений)',
+      Object.assign(el('input'), { type: 'number', min: 15, max: 120,
+        value: s.pages || '', placeholder: 'Например, 25' }));
+
     var row = el('div', 'row');
     var save = el('button', 'btn', 'Сохранить');
     row.appendChild(save);
@@ -138,6 +144,7 @@
         methodichka: meth.value.trim(),
         wishes: wishes.value.trim(),
         chapters: picked && picked.value ? Number(picked.value) : null,
+        pages: Number(pages.value) >= 10 ? Math.round(Number(pages.value)) : null,
       });
       status.textContent = 'Сохранено';
       setTimeout(shell.close, 450);

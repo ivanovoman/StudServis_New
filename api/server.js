@@ -2,7 +2,8 @@
 require('dotenv').config();
 const express = require('express');
 const path = require('path');
-const { STEP_PROMPTS, applyChapters } = require('./prompts');
+const { STEP_PROMPTS, applyChapters, planSize } = require('./prompts');
+const { checkLawNames } = require('./lawregistry');
 const { parseOutline, buildQueue, resolveChapterTitles } = require('./outline');
 const { createQueue } = require('./jobqueue');
 const { parseSlides } = require('./slides');
@@ -162,6 +163,13 @@ function buildBrief(s = {}) {
     parts.push(`Число глав: ${s.chapters} (задано пользователем).`);
   }
 
+  const size = planSize(s.pages, s.chapters);
+  if (size) {
+    parts.push(`Объём работы: ${size.pages} страниц (задано пользователем). `
+      + `В основной части ${size.sections} параграф`
+      + `${size.sections < 5 ? 'а' : 'ов'} по 5000-6000 знаков без пробелов.`);
+  }
+
   if (s.methodichka) {
     // Методичка может быть длинной; в промпт идёт начало, где обычно
     // и стоят требования к структуре и объёму.
@@ -190,7 +198,7 @@ function buildMessages(step, userInput, history = [], settings = {}) {
   // Число глав приходит из настроек работы. Если не задано, модель
   // выбирает сама между двумя и тремя - фиксировать тройку нельзя,
   // курсовая бывает и двухглавой.
-  const systemPrompt = applyChapters(raw, settings.chapters);
+  const systemPrompt = applyChapters(raw, settings.chapters, settings.pages);
 
   const messages = [{ role: 'system', content: systemPrompt }];
 
@@ -232,14 +240,31 @@ async function verifyLegalRefs(text) {
     if (!r.ok) return null;
 
     const data = await r.json();
-    if (!data.checked) return null;
-
-    return data;
+    return mergeLawNames(data.checked ? data : null, text);
   } catch {
     // Бэкенд не поднят или базы не отвечают. Текст уже отдан
-    // пользователю, ломать выдачу из-за справки нельзя.
-    return null;
+    // пользователю, ломать выдачу из-за справки нельзя. Справочник
+    // законов работает и без него.
+    return mergeLawNames(null, text);
   }
+}
+
+/**
+ * Добавляет к ответу Python-проверки сверку «название закона — номер».
+ * Python сверяет статьи кодексов, а подмену номера закона («ФЗ-328
+ * „О ЦФА“» вместо 259-ФЗ) не видит. Справочник локальный, поэтому
+ * работает и когда бэкенд не поднят.
+ */
+function mergeLawNames(data, text) {
+  const extra = checkLawNames(text);
+  if (!data && !extra.length) return null;
+  const base = data || { checked: 0, problems: 0, references: [] };
+  return {
+    ...base,
+    checked: (base.checked || 0) + extra.length,
+    problems: (base.problems || 0) + extra.length,
+    references: [...extra, ...(base.references || [])],
+  };
 }
 
 
@@ -994,10 +1019,10 @@ async function checkLegalRefs(text) {
       body: JSON.stringify({ text }),
       signal: AbortSignal.timeout(25000),
     });
-    if (!r.ok) return null;
-
-    const data = await r.json();
-    const refs = data.references || [];
+    const data = r.ok ? await r.json() : null;
+    const merged = mergeLawNames(data && (data.references || []).length ? data : null, text);
+    if (!merged) return null;
+    const refs = merged.references || [];
 
     // Наружу отдаём только то, что требует внимания. Совпавшие ссылки
     // перечислять незачем: длинный зелёный список читать не будут, а
@@ -1012,7 +1037,9 @@ async function checkLegalRefs(text) {
       unclear: pick('unclear'),
     };
   } catch (e) {
-    return null;
+    const merged = mergeLawNames(null, text);
+    if (!merged) return null;
+    return { checked: merged.checked, wrong: merged.references.map((x) => ({ label: x.label, note: x.note })), unclear: [] };
   }
 }
 
@@ -1433,7 +1460,7 @@ async function writePiece(task, ctx, opts = {}) {
   if (!raw) throw new Error(`нет промпта для шага ${stepName}`);
 
   const messages = [
-    { role: 'system', content: applyChapters(raw, settings && settings.chapters) },
+    { role: 'system', content: applyChapters(raw, settings && settings.chapters, settings && settings.pages) },
   ];
 
   const brief = buildBrief(settings || {});
@@ -1528,6 +1555,28 @@ async function writePiece(task, ctx, opts = {}) {
  * писать по одному пункту, а не всю работу разом. Раньше план жил на
  * экране простынёй текста, и управлять им было нечем.
  */
+/**
+ * Замечания к плану, которые видно без модели: неверные реквизиты
+ * законов и несоответствие числа параграфов объёму работы. План часто
+ * вставляют руками или правят после генерации — проверять нужно здесь,
+ * а не только при генерации.
+ */
+function planWarnings(plan, queue, settings) {
+  const out = checkLawNames(plan).map((p) => `Реквизиты: ${p.label} — ${p.note}.`);
+  const size = planSize(settings && settings.pages, settings && settings.chapters);
+  const n = queue.filter((t) => t.kind === 'section').length;
+  if (size && n) {
+    if (n > size.sections + 1) {
+      out.push(`В плане ${n} параграфов, а на ${size.pages} страниц помещается около `
+        + `${size.sections}: каждый выйдет короче нормы. Объедините близкие параграфы.`);
+    } else if (n < size.sections - 1) {
+      out.push(`В плане ${n} параграфа, а объём ${size.pages} страниц рассчитан примерно на `
+        + `${size.sections}: работа может выйти короче заданного объёма.`);
+    }
+  }
+  return out;
+}
+
 app.post('/api/outline', (req, res) => {
   const { plan } = req.body || {};
   if (!plan || String(plan).trim().length < 100) {
@@ -1540,7 +1589,7 @@ app.post('/api/outline', (req, res) => {
   const queue = buildQueue(outline);
   res.json({
     chapters: outline.chapters,
-    warnings: outline.warnings,
+    warnings: [...(outline.warnings || []), ...planWarnings(plan, queue, (req.body || {}).settings)],
     queue,
     total: queue.length,
     topic: topicFromPlan(plan),
@@ -2112,7 +2161,7 @@ app.post('/api/slides', async (req, res) => {
 
   try {
     const prompt = applyChapters(
-      STEP_PROMPTS.slides, settings && settings.chapters);
+      STEP_PROMPTS.slides, settings && settings.chapters, settings && settings.pages);
     const { upstream } = await callOpenRouterWithFallback([
       { role: 'system', content: prompt },
       { role: 'user', content: text.slice(0, 40000) },
