@@ -299,3 +299,11 @@ def test_missing_law_article():
     toc = _static_toc("ИПОТ")
     ref = extract("Согласно ст. 99 Закона об ипотеке залог возникает.")[0]
     assert compare(ref, toc).status == "missing"
+
+
+def test_law_ref_after_code_ref_not_swallowed():
+    """«Ст. 342 ГК РФ и ст. 43 Закона об ипотеке» — обе ссылки."""
+    refs = [(r.code, r.article) for r in extract(
+        "Ст. 342 ГК РФ и ст. 43 Закона об ипотеке допускают это.")]
+    assert ("ГК", "342") in refs
+    assert ("ИПОТ", "43") in refs

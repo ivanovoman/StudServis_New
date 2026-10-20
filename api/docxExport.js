@@ -276,8 +276,85 @@ function makeBodyParagraphWithNotes(text, sources, refs) {
 }
 
 function makeBodyParagraphsWithNotes(text, sources, refs) {
-  if (!sources || !sources.length) return makeBodyParagraphs(text);
-  return splitParagraphs(text).map((p) => makeBodyParagraphWithNotes(p, sources, refs));
+  const para = (p) => (sources && sources.length
+    ? makeBodyParagraphWithNotes(p, sources, refs) : makeBodyParagraph(p));
+  return makeStructuredBlocks(text, para, refs || {});
+}
+
+const CAPTION_RE = /^\s*Таблица\s*№?\s*(\d+)\.?\s*(.*)$/i;
+const BULLET_RE = /^\s*(?:[-–—•*])\s+(.*)$/;
+
+/**
+ * Текст раздела со вставками, которые заказчик сам делает в курсовой:
+ * маркированный список («Договор ипотеки определяет: - …; - …»), таблица
+ * в Markdown с подписью «Таблица N. …» и строкой «Источник: …».
+ *
+ * Таблицы нумеруются сквозь всю работу: номер, который поставила модель
+ * (она видит один раздел и пишет «Таблица 1» или «таблица № 3»), заменяется
+ * следующим по счёту — и в подписи, и в отсылке «приведены в таблице № N».
+ * Счётчик живёт в `state.tableNo` (state — накопитель сносок документа).
+ */
+function makeStructuredBlocks(text, para, state) {
+  const raw = String(text || '');
+  const renum = {};
+  for (const line of raw.split('\n')) {
+    const m = line.match(CAPTION_RE);
+    if (m && !(m[1] in renum)) {
+      state.tableNo = (state.tableNo || 0) + 1;
+      renum[m[1]] = state.tableNo;
+    }
+  }
+  const body = Object.keys(renum).length
+    ? raw.replace(/(таблиц[а-яё]*)(\s*)(№\s*)?(\d+)/gi,
+      (m, word, sp, no, n) => (n in renum ? `${word} № ${renum[n]}` : m))
+    : raw;
+
+  const blocks = [];
+  for (const chunk of splitParagraphs(body)) {
+    const lines = chunk.split('\n');
+    let prose = [];
+    const flush = () => {
+      if (prose.length) blocks.push(para(prose.join(' ').replace(/\s+/g, ' ').trim()));
+      prose = [];
+    };
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i];
+      if (/^\s*\|/.test(line)) {
+        flush();
+        let j = i;
+        while (j < lines.length && (/^\s*\|/.test(lines[j]) || (lines[j].trim() && !CAPTION_RE.test(lines[j])
+          && !/^\s*Источник\s*:/i.test(lines[j]) && /^\s*\|/.test(lines[j - 1] || '') && !/\|\s*$/.test(lines[j - 1] || '')))) j++;
+        const table = makeTable(parseMarkdownTable(lines.slice(i, j).join('\n')));
+        if (table) blocks.push(table);
+        else blocks.push(para(lines.slice(i, j).join(' ')));
+        i = j - 1;
+        continue;
+      }
+      const cap = line.match(CAPTION_RE);
+      if (cap) {
+        flush();
+        blocks.push(makeTableCaption(cap[1], cap[2].replace(/\*\*/g, '').trim()));
+        continue;
+      }
+      if (/^\s*Источник\s*:/i.test(line)) {
+        flush();
+        blocks.push(new Paragraph({
+          children: [new TextRun({ text: fixDashes(line.trim()), size: TABLE_SIZE, font: FONT })],
+          spacing: { before: 0, after: 0, line: 360 },
+        }));
+        continue;
+      }
+      const bullet = line.match(BULLET_RE);
+      if (bullet) {
+        flush();
+        blocks.push(makeBodyParagraph(`– ${bullet[1].trim()}`));
+        continue;
+      }
+      prose.push(line);
+    }
+    flush();
+  }
+  return blocks;
 }
 
 // Таблица без заливки, 11pt, шапка по центру, тело по левому краю,
@@ -729,6 +806,7 @@ module.exports = {
   buildTitlePage,
   splitParagraphs,
   parseMarkdownTable,
+  makeStructuredBlocks,
   fixDashes,
   stripDuplicateHeading,
 };

@@ -248,4 +248,51 @@ function stripBoldHeadings(text) {
   return { text: out, removed };
 }
 
-module.exports = { stripBoldHeadings, relocateTransitions, fixMixedScript, hasDisclaimer, stripDisclaimers, splitTail, appendBeforeTail, TRANSITION };
+/**
+ * Убирает предложения-примеры с выдуманными суммами или адресами:
+ * «Например, если квартира продана за 5 млн рублей, а долг — 6 млн…»,
+ * «…указано «квартира по адресу г. Москва, ул. Тверская»…». Заказчик
+ * вычёркивал их в каждом параграфе (1.1, 1.2, 2.1), а запрет в промпте
+ * GigaChat нарушает примерно в одном прогоне из трёх.
+ *
+ * Удаляется только предложение, которое НАЧИНАЕТСЯ с «Например»,
+ * «Допустим», «Предположим», — то есть само является примером: правило
+ * от этого не теряется. Предложения со ссылкой [N] не трогаем.
+ */
+function dropInventedExamples(text) {
+  const MONEY = /\d+(?:[.,]\d+)?\s*(?:млн|млрд|тыс\.?|руб)/gi;
+  const ADDR = /(?<![А-Яа-яЁё])(?:г\.\s*[А-ЯЁ][а-яё]+\s*,\s*(?:ул|пр-т|просп|пер)\.|по\s+адресу\s+[А-ЯЁг])/;
+  let removed = 0;
+  const out = String(text || '').split('\n').map((line) => {
+    const kept = exampleSentences(line).filter((sent) => {
+      if (!/^\s*(?:Например|Допустим|Предположим)(?![а-яё])/.test(sent)) return true;
+      if (/\[\d+/.test(sent)) return true;
+      if ((sent.match(MONEY) || []).length >= 2 || ADDR.test(sent)) { removed += 1; return false; }
+      return true;
+    });
+    return kept.join('').replace(/\s+$/, '');
+  });
+  return { text: out.join('\n'), removed };
+}
+
+const EXAMPLE_ABBR = new Set(['г', 'ул', 'д', 'кв', 'ст', 'п', 'пп', 'ч', 'т', 'тыс', 'млн', 'млрд', 'руб', 'коп',
+  'см', 'гл', 'пр', 'просп', 'пер', 'обл', 'им', 'др', 'т.е', 'т.к', 'т.п', 'т.д']);
+
+/** Предложения строки вместе с пробелами после них; сокращения («г. Москва», «500 тыс. рублей») не режут. */
+function exampleSentences(line) {
+  const out = [];
+  let from = 0;
+  const re = /[.!?]+(\s+)(?=[А-ЯЁA-Z«"])/g;
+  let m;
+  while ((m = re.exec(line))) {
+    const before = line.slice(from, m.index);
+    const word = (before.match(/([А-Яа-яЁёA-Za-z.]+)$/) || [])[1] || '';
+    if (m[0].startsWith('.') && EXAMPLE_ABBR.has(word.toLowerCase())) continue;
+    out.push(line.slice(from, m.index + m[0].length));
+    from = m.index + m[0].length;
+  }
+  if (from < line.length) out.push(line.slice(from));
+  return out;
+}
+
+module.exports = { dropInventedExamples, stripBoldHeadings, relocateTransitions, fixMixedScript, hasDisclaimer, stripDisclaimers, splitTail, appendBeforeTail, TRANSITION };

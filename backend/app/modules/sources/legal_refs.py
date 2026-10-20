@@ -296,12 +296,20 @@ def extract(text: str) -> list[Reference]:
         (m, _canonical_code(m.group("code"))) for m in _REF_RE.finditer(text)]
     for m in _LAW_REF_BACK_RE.finditer(text):
         matches.append((m, "ИПОТ"))
-    for m in _LAW_REF_RE.finditer(text):
+    pos = 0
+    while True:
+        m = _LAW_REF_RE.search(text, pos)
+        if not m:
+            break
+        pos = m.end()
         # В промежутке не должно быть конца предложения и другой статьи
         # кодекса: «ст. 446 ГПК РФ… Закона об ипотеке» — не про закон.
+        # Отброшенное совпадение не должно съедать следующую ссылку:
+        # «ст. 342 ГК РФ и ст. 43 Закона об ипотеке».
         gap = m.group("gap")
         if re.search(r"\.\s+[А-ЯЁ]", gap) or re.search(
                 r"\b(?:ТК|ГК|ЖК|СК|УК|КоАП|ГПК|АПК|НК|УПК|ЗК)\b", gap):
+            pos = m.start() + 1
             continue
         code = next((c for pat, c in _LAW_CODES
                      if re.search(pat, m.group("law"), re.IGNORECASE)), "")

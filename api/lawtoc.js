@@ -112,10 +112,18 @@ function articleRefs(text) {
         });
       }
     };
-    law.forward.lastIndex = 0;
-    for (const m of src.matchAll(law.forward)) {
+    // Ручной цикл вместо matchAll: если совпадение отброшено («ст. 342
+    // ГК РФ и ст. 43 Закона об ипотеке» — между номером и законом стоит
+    // кодекс), поиск продолжается со следующего символа, и вторая ссылка
+    // не теряется.
+    const fwd = new RegExp(law.forward.source, 'gi');
+    let m;
+    while ((m = fwd.exec(src))) {
       const gap = m[2] || '';
-      if (/\.\s+[А-ЯЁ]/.test(gap) || CODES_IN_GAP.test(gap)) continue;
+      if (/\.\s+[А-ЯЁ]/.test(gap) || CODES_IN_GAP.test(gap)) {
+        fwd.lastIndex = m.index + 1;
+        continue;
+      }
       push(m[1], m.index, m.index + m[0].length);
     }
     law.backward.lastIndex = 0;

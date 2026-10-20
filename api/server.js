@@ -13,7 +13,7 @@ const { generateFragmentDocx, generateFullDocx } = require('./docxExport');
 const { resolveProviders, modelsFor } = require('./providers');
 const { fetchDossier, dossierBlock } = require('./dossier');
 const { findColloquial, fixRegister } = require('./register');
-const { stripDisclaimers, appendBeforeTail, fixMixedScript, stripBoldHeadings } = require('./cleanup');
+const { stripDisclaimers, appendBeforeTail, fixMixedScript, stripBoldHeadings, dropInventedExamples } = require('./cleanup');
 const { createSourcePins, pinKeys, foundFromList } = require('./worksources');
 const { localChecks, parseReview, REVIEW_PROMPT, reviseMessages, rejectRevision } = require('./textreview');
 
@@ -935,7 +935,8 @@ app.post('/api/assemble', async (req, res) => {
       if (markers) {
         console.log(`Убрано служебных пометок материалов: ${markers}`);
       }
-      const { text, fixed } = fixHybrids(unmarked);
+      const { text: hybridFree, fixed } = fixHybrids(unmarked);
+      const { text } = dropInventedExamples(hybridFree);
       done.push({ task, text });
       await storage.savePiece(task, text, i);
 
@@ -1479,7 +1480,8 @@ const SECTION_CHECKLIST = `ПРОВЕРЬ ПЕРЕД ОТВЕТОМ:
 4. Только то, что охватывает заголовок и план этого раздела. Без отступлений, расчётов с выдуманными суммами, ссылок на «практику» без реквизитов акта и без отсылок к другим параграфам работы.
 5. Если раздел разбирает несколько элементов (функции, признаки) — вводная фраза, затем каждый элемент отдельным абзацем, который НАЧИНАЕТСЯ с названия элемента жирным: «**Обеспечительная функция** заключается в …». Подзаголовков отдельной строкой нет. Новых элементов, которых нет в плане, не придумывай.
 6. Закон при первом упоминании — полностью: «Федеральный закон от … № … „…“», дальше кратко.
-7. Номер статьи закона — только если правило соответствует её заголовку из перечня действующих статей. Ограничения — со ссылкой на норму. Без «на практике», «банки редко», «наиболее ликвидный», без сроков в днях, МФЦ и перечней документов.`;
+7. Номер статьи закона — только если правило соответствует её заголовку и содержанию из перечня действующих статей; специальная статья закона важнее общей нормы кодекса. Ограничения — со ссылкой на норму. Без «на практике», «банки редко», «наиболее ликвидный», без сроков в днях, МФЦ и перечней документов.
+8. Без пересказа судебных споров и их исхода без реквизитов акта. Без прав и обязанностей сторон, которых нет в норме.`;
 
 /**
  * Заголовки остальных параграфов с их планами — чтобы модель знала,
@@ -1614,6 +1616,13 @@ async function writePiece(task, ctx, opts = {}) {
       + ' и здание на нём). Институты, которых нет в заголовке и плане раздела (например, закладная'
       + ' в параграфе о предмете и регистрации), не разбирай. Объём —'
       + ' 4500-6000 знаков без пробелов.';
+    // Таблица — только там, где есть что сопоставлять. Заказчик добавил
+    // её в параграф о правах и обязанностях сторон договора ипотеки;
+    // сама модель таблиц в разделах не предлагала ни разу.
+    if (/права\s+и\s+обязанност|виды|классификац|сравнит|соотношени|отличи/i.test(String(task.heading || task.title || ''))) {
+      user += '\n\nЗаголовок раздела предполагает сопоставление — перед итоговым абзацем дай одну'
+        + ' таблицу по правилам «СПИСОК И ТАБЛИЦА»: отсылка, «Таблица 1. …», Markdown, «Источник: …».';
+    }
     user += `\n\n${SECTION_CHECKLIST}`;
   } else if (task.kind === 'introduction') {
     user = 'Напиши введение к работе по плану выше.';
@@ -1777,7 +1786,11 @@ app.post('/api/section', async (req, res) => {
     if (markers) {
       console.log(`Убрано служебных пометок материалов: ${markers}`);
     }
-    const { text, fixed } = fixHybrids(unmarked);
+    const { text: hybridFree, fixed } = fixHybrids(unmarked);
+    // Примеры с выдуманными суммами и адресами заказчик вычёркивал в
+    // каждом параграфе; запрет в промпте нарушается примерно раз в три прогона.
+    const { text, removed: examplesDropped } = dropInventedExamples(hybridFree);
+    if (examplesDropped) console.log(`Убрано примеров с выдуманными суммами/адресами: ${examplesDropped}`);
 
     const legal = await checkLegalRefs(text);
     if (legal && (legal.wrong.length || legal.unclear.length)) {
