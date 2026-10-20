@@ -244,3 +244,58 @@ def test_summary_separates_unclear():
                         status="unclear", real_title="Аналогия закона")
     text = CheckResult(references=[unclear]).summary()
     assert "проверьте глазами" in text
+
+
+# --- федеральные законы (оглавление в проекте) -----------------------
+
+from app.modules.sources.legal_refs import _static_toc  # noqa: E402
+
+IPOTEKA_MODEL = (
+    "Закон об ипотеке в ст. 5 прямо перечисляет объекты: земельные участки. "
+    "Это правило сбалансировано ст. 54.1 и 61 Закона об ипотеке: если банк "
+    "оставляет предмет залога за собой или продает его, но вырученных "
+    "средств не хватило, остаток долга прекращается. "
+    "Другой пример — ст. 64.2 Закона об ипотеке: при строительстве здания "
+    "на бюджетные средства здание находится в ипотеке у субъекта РФ."
+)
+
+
+def test_law_refs_extracted_both_orders():
+    refs = [(r.code, r.article) for r in extract(IPOTEKA_MODEL)]
+    assert refs == [("ИПОТ", "5"), ("ИПОТ", "54.1"), ("ИПОТ", "61"),
+                    ("ИПОТ", "64.2")]
+    assert extract(IPOTEKA_MODEL)[0].label == "ст. 5 Закона об ипотеке"
+
+
+def test_law_ref_with_full_requisites():
+    text = ("Статья 5 Федерального закона от 16 июля 1998 г. № 102-ФЗ "
+            "«Об ипотеке (залоге недвижимости)» относит к таким объектам")
+    assert [r.article for r in extract(text)] == ["5"]
+
+
+def test_static_toc_loaded():
+    toc = _static_toc("ИПОТ")
+    assert len(toc) >= 90
+    assert toc["21"].startswith("Утратила")
+
+
+def test_wrong_article_for_shortfall_rule():
+    """Остаток долга после реализации — не предмет ст. 54.1."""
+    toc = _static_toc("ИПОТ")
+    ref = next(r for r in extract(IPOTEKA_MODEL) if r.article == "54.1")
+    ref = compare(ref, toc)
+    assert ref.status == "mismatch"
+    assert "Основания для отказа" in ref.note
+
+
+def test_law_name_words_do_not_confirm():
+    """«ипотеке» из названия закона не подтверждает «Ипотека …» в заголовке."""
+    toc = _static_toc("ИПОТ")
+    ref = extract("Это установлено ст. 69.1 Закона об ипотеке.")[0]
+    assert compare(ref, toc).status in {"listed", "unclear"}
+
+
+def test_missing_law_article():
+    toc = _static_toc("ИПОТ")
+    ref = extract("Согласно ст. 99 Закона об ипотеке залог возникает.")[0]
+    assert compare(ref, toc).status == "missing"

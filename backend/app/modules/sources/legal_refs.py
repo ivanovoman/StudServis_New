@@ -30,6 +30,8 @@
 from __future__ import annotations
 
 import html
+import json
+import os
 import re
 from dataclasses import dataclass, field
 
@@ -52,6 +54,17 @@ CODE_DOCS: dict[str, str] = {
     "НК": "19671",
     "УПК": "34481",
     "ЗК": "33773",
+    # Федеральные законы. Ключ — условное обозначение, в тексте закон
+    # называют по-разному («Закон об ипотеке», «№ 102-ФЗ»), распознаёт
+    # их _LAW_REF_RE ниже.
+    "ИПОТ": "19396",
+}
+
+#: Оглавления, сохранённые в проекте: если правовая база недоступна,
+#: проверка всё равно работает. Обновлять при существенных изменениях
+#: закона (источник указан в файле).
+STATIC_TOC: dict[str, str] = {
+    "ИПОТ": "ipoteka.json",
 }
 
 #: Части ГК ищутся все сразу: в тексте пишут просто «ст. 1102 ГК РФ»,
@@ -80,15 +93,58 @@ CODE_NAMES: dict[str, str] = {
     "НК": "Налоговый кодекс РФ",
     "УПК": "Уголовно-процессуальный кодекс РФ",
     "ЗК": "Земельный кодекс РФ",
+    "ИПОТ": "Федеральный закон «Об ипотеке (залоге недвижимости)»",
+}
+
+#: Как ссылку показывать человеку: для законов «РФ» после названия не пишут.
+CODE_LABELS: dict[str, str] = {
+    "ИПОТ": "Закона об ипотеке",
 }
 
 #: «ст. 4 ТК РФ», «статья 61.11 Закона о банкротстве», «ст. ст. 10, 12 ГК»
 _REF_RE = re.compile(
-    r"ст(?:атьи|атья|атьёй|атьей|\.)\s*(?:ст\.\s*)?"
+    r"ст(?:атьи|атья|атьёй|атьей|атьями|атьях|атьям|\.)\s*(?:ст\.\s*)?"
     r"(?P<nums>\d+(?:\.\d+)?(?:\s*[,и]\s*\d+(?:\.\d+)?)*)"
     r"[^.;:)\n]{0,40}?"
     r"(?P<code>ТК|ГК|ЖК|СК|УК|КоАП|ГПК|АПК|НК|УПК|ЗК)\b",
     re.IGNORECASE,
+)
+
+#: Ссылки на статьи федеральных законов: «ст. 64.2 Закона об ипотеке»,
+#: «статьями 10 и 11 Закона об ипотеке», «ст. 5 Федерального закона от
+#: 16 июля 1998 г. № 102-ФЗ «Об ипотеке…»». Между номером и названием
+#: допускаем точки — в датах и «г.», — но не конец предложения.
+#: Заведено после курсовой об ипотеке: модель приписала ст. 64.2 залог
+#: в пользу субъекта РФ при строительстве на бюджетные средства, а ст.
+#: 54.1 и 61 — прекращение остатка долга. Кодексы это не ловило.
+_LAW_REF_RE = re.compile(
+    r"ст(?:атьи|атья|атьёй|атьей|атьями|атьях|атьям|атье|\.)\s*(?:ст\.\s*)?"
+    r"(?P<nums>\d+(?:\.\d+)?(?:\s*[,и]\s*\d+(?:\.\d+)?)*)"
+    r"(?P<gap>[^;:)\n]{0,80}?)"
+    r"(?P<law>Закон[а-яё]*\s+об\s+ипотеке|«Об\s+ипотеке|\bN\s*102-ФЗ|№\s*102-ФЗ)",
+    re.IGNORECASE,
+)
+
+#: Обратный порядок: «Закон об ипотеке в ст. 5 перечисляет…».
+_LAW_REF_BACK_RE = re.compile(
+    r"(?P<law>Закон[а-яё]*\s+об\s+ипотеке)\s+(?:в\s+)?"
+    r"ст(?:атье|атьях|атьями|\.)\s*"
+    r"(?P<nums>\d+(?:\.\d+)?(?:\s*[,и]\s*\d+(?:\.\d+)?)*)",
+    re.IGNORECASE,
+)
+
+#: Слова из названий законов: они совпадают с заголовками почти всех
+#: статей («Ипотека земельного участка…») и ничего не подтверждают.
+_LAW_NAME_RE = re.compile(
+    r"Федеральн[а-яё]*\s+закон[а-яё]*|Закон[а-яё]*\s+об\s+ипотеке|"
+    r"«?Об\s+ипотеке(?:\s*\(залоге\s+недвижимости\))?»?|№\s*\d+-ФЗ|"
+    r"от\s+\d{1,2}(?:\.\d{2}\.|\s+[а-я]+\s+)\d{4}\s*(?:г\.)?",
+    re.IGNORECASE,
+)
+
+#: Какой закон стоит за найденным названием.
+_LAW_CODES: tuple[tuple[str, str], ...] = (
+    (r"ипотек|102-ФЗ", "ИПОТ"),
 )
 
 #: «Статья 4. Запрещение принудительного труда» в оглавлении.
@@ -101,6 +157,9 @@ _STOP = {
     "и", "или", "в", "во", "на", "о", "об", "от", "по", "с", "со", "к",
     "для", "при", "не", "за", "до", "из", "их", "а", "но", "что", "как",
     "это", "рф", "российской", "федерации", "иные", "иных", "также",
+    # «правило» по основе совпадает с «прав требования» в заголовках и
+    # давало ложные подсказки другого номера.
+    "правило", "правила", "правил", "правилу", "правилом",
 }
 
 
@@ -118,6 +177,8 @@ class Reference:
 
     @property
     def label(self) -> str:
+        if self.code in CODE_LABELS:
+            return f"ст. {self.article} {CODE_LABELS[self.code]}"
         return f"ст. {self.article} {self.code} РФ"
 
 
@@ -231,12 +292,36 @@ def extract(text: str) -> list[Reference]:
     found: list[Reference] = []
     seen: set[tuple[str, str]] = set()
 
-    for m in _REF_RE.finditer(text):
-        code = _canonical_code(m.group("code"))
+    matches: list[tuple[re.Match, str]] = [
+        (m, _canonical_code(m.group("code"))) for m in _REF_RE.finditer(text)]
+    for m in _LAW_REF_BACK_RE.finditer(text):
+        matches.append((m, "ИПОТ"))
+    for m in _LAW_REF_RE.finditer(text):
+        # В промежутке не должно быть конца предложения и другой статьи
+        # кодекса: «ст. 446 ГПК РФ… Закона об ипотеке» — не про закон.
+        gap = m.group("gap")
+        if re.search(r"\.\s+[А-ЯЁ]", gap) or re.search(
+                r"\b(?:ТК|ГК|ЖК|СК|УК|КоАП|ГПК|АПК|НК|УПК|ЗК)\b", gap):
+            continue
+        code = next((c for pat, c in _LAW_CODES
+                     if re.search(pat, m.group("law"), re.IGNORECASE)), "")
+        if code:
+            matches.append((m, code))
+    matches.sort(key=lambda mc: mc[0].start())
+
+    for m, code in matches:
         start = max(0, m.start() - 120)
         end = min(len(text), m.end() + 120)
         context = re.sub(r"\s+", " ", text[start:end]).strip()
         claim = _claim_around(text, m.start(), m.end())
+        if len(_claim_words(claim)) < 2:
+            # «Другой пример — ст. 64.2 Закона об ипотеке: при строительстве…»
+            # Сама фраза со ссылкой пустая, а утверждение — после двоеточия
+            # или тире. Берём его до конца предложения.
+            tail = re.match(r"\s*[:\u2014\u2013-]\s*([^;\n]*?)(?:\.\s+(?=[А-ЯЁ])|[;\n]|\.?$)",
+                            text[m.end():])
+            if tail and tail.group(1).strip():
+                claim = f"{claim}: {tail.group(1).strip()}"
 
         for num in re.findall(r"\d+(?:\.\d+)?", m.group("nums")):
             key = (code, num)
@@ -266,6 +351,11 @@ async def fetch_toc(code: str, client: httpx.AsyncClient) -> dict[str, str]:
     """
     toc: dict[str, str] = {}
 
+    if code in STATIC_TOC and os.environ.get("LEGAL_TOC_ONLINE") != "1":
+        # Для законов с сохранённым оглавлением сеть не нужна: оно
+        # проверено и не зависит от доступности КонсультантПлюс.
+        return _static_toc(code)
+
     for key in CODE_ALIASES.get(code, (code,)):
         doc = CODE_DOCS.get(key)
         if not doc:
@@ -292,6 +382,30 @@ async def fetch_toc(code: str, client: httpx.AsyncClient) -> dict[str, str]:
                 toc[num] = title
 
     return toc
+
+
+def _static_toc(code: str) -> dict[str, str]:
+    """Оглавление из файла в каталоге toc/ рядом с модулем."""
+    name = STATIC_TOC.get(code)
+    if not name:
+        return {}
+    path = os.path.join(os.path.dirname(__file__), "toc", name)
+    try:
+        with open(path, encoding="utf-8") as fh:
+            data = json.load(fh)
+    except (OSError, ValueError):
+        return {}
+    return {k: v for k, v in data.items() if not k.startswith("_")}
+
+
+def _claim_words(claim: str) -> set[str]:
+    """Значимые слова утверждения без самих ссылок и названий законов."""
+    rest = _REF_RE.sub(" ", claim)
+    rest = _LAW_REF_RE.sub(" ", rest)
+    rest = _LAW_REF_BACK_RE.sub(" ", rest)
+    rest = _LAW_NAME_RE.sub(" ", rest)
+    rest = re.sub(r"\bРФ\b", " ", rest)
+    return _words(rest)
 
 
 def _words(text: str) -> set[str]:
@@ -351,9 +465,7 @@ def _is_enumeration(claim: str) -> bool:
     реальном плане она пометила шесть ссылок из девяти, хотя ошибочной
     была одна.
     """
-    rest = _REF_RE.sub(" ", claim)
-    rest = re.sub(r"\bРФ\b", " ", rest)
-    return len(_words(rest)) < 2
+    return len(_claim_words(claim)) < 2
 
 
 def compare(ref: Reference, toc: dict[str, str]) -> Reference:
@@ -394,7 +506,7 @@ def compare(ref: Reference, toc: dict[str, str]) -> Reference:
         ref.note = f"упомянута в перечне; статья называется «{title}»"
         return ref
 
-    claim_words = _words(ref.claim or ref.context)
+    claim_words = _claim_words(ref.claim or ref.context)
     overlap = _overlap(_words(title), claim_words)
     if overlap:
         ref.status = "ok"
@@ -455,7 +567,9 @@ def _better_article(
             continue
         if title.lower().startswith("утратил"):
             continue
-        score = len(_overlap(_words(title), claim_words))
+        # Считаем совпавшие слова утверждения, а не заголовка: иначе одно
+        # слово текста засчитывается дважды («прав» и «правил»).
+        score = len(_overlap(claim_words, _words(title)))
         if score < _BETTER_MIN_WORDS:
             continue
         if best is None or score > best[0]:

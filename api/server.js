@@ -3,6 +3,7 @@ require('dotenv').config();
 const express = require('express');
 const path = require('path');
 const { STEP_PROMPTS, applyChapters, planSize } = require('./prompts');
+const { tocProblems, tocHint, reviewTitles } = require('./lawtoc');
 const { checkLawNames } = require('./lawregistry');
 const { parseOutline, buildQueue, resolveChapterTitles } = require('./outline');
 const { createQueue } = require('./jobqueue');
@@ -256,7 +257,11 @@ async function verifyLegalRefs(text) {
  * работает и когда бэкенд не поднят.
  */
 function mergeLawNames(data, text) {
-  const extra = checkLawNames(text);
+  // Ссылки на несуществующие и утратившие силу статьи законов, чьи
+  // оглавления лежат в проекте (lawtoc.js). Python это тоже видит, но
+  // он может быть не запущен; дубли по метке отбрасываем.
+  const pyLabels = new Set(((data && data.references) || []).map((r) => r.label));
+  const extra = [...checkLawNames(text), ...tocProblems(text).filter((r) => !pyLabels.has(r.label))];
   if (!data && !extra.length) return null;
   const base = data || { checked: 0, problems: 0, references: [] };
   return {
@@ -1473,7 +1478,8 @@ const SECTION_CHECKLIST = `ПРОВЕРЬ ПЕРЕД ОТВЕТОМ:
 3. Ни одного предложения длиннее 30 слов. Абзац — 2-4 предложения.
 4. Только то, что охватывает заголовок и план этого раздела. Без отступлений, расчётов с выдуманными суммами, ссылок на «практику» без реквизитов акта и без отсылок к другим параграфам работы.
 5. Если раздел разбирает несколько элементов (функции, признаки) — вводная фраза, затем каждый элемент отдельным абзацем, который НАЧИНАЕТСЯ с названия элемента жирным: «**Обеспечительная функция** заключается в …». Подзаголовков отдельной строкой нет. Новых элементов, которых нет в плане, не придумывай.
-6. Закон при первом упоминании — полностью: «Федеральный закон от … № … „…“», дальше кратко.`;
+6. Закон при первом упоминании — полностью: «Федеральный закон от … № … „…“», дальше кратко.
+7. Номер статьи закона — только если правило соответствует её заголовку из перечня действующих статей. Ограничения — со ссылкой на норму. Без «на практике», «банки редко», «наиболее ликвидный», без сроков в днях, МФЦ и перечней документов.`;
 
 /**
  * Заголовки остальных параграфов с их планами — чтобы модель знала,
@@ -1538,6 +1544,12 @@ async function writePiece(task, ctx, opts = {}) {
   // склеивает все system в одно сообщение, и требование ссылаться
   // тонуло в середине: живая сборка дала 3 ссылки на 11 разделов,
   // девять разделов остались вообще без опоры на литературу.
+  // Оглавление закона по теме работы (lawtoc.js): без него модель
+  // приписывала статьям чужой предмет и брала перечни из старых редакций.
+  const lawBlock = tocHint([settings && settings.topic, task.heading || task.title, task.brief, String(plan || '').slice(0, 3000)]
+    .filter(Boolean).join('\n'));
+  if (lawBlock) messages.push({ role: 'system', content: lawBlock });
+
   const srcBlock = sourcesBlock(sources);
   if (srcBlock) messages.push({ role: 'system', content: srcBlock });
 
@@ -1596,7 +1608,11 @@ async function writePiece(task, ctx, opts = {}) {
       + `ссылайся и не пиши, что вопрос «рассматривается далее» или «относится к параграфу»:\n${others}`;
     user += '\n\nРаскрой всё, что охватывает заголовок раздела, даже если в кратком плане'
       + ' названо не всё: для понятия — признаки, участники, соотношение со смежными способами'
-      + ' или институтами того же уровня; для функций или видов — каждый элемент. Объём —'
+      + ' или институтами того же уровня; для функций или видов — каждый элемент; для предмета'
+      + ' (объекта) — что может быть предметом по закону, ограничения со ссылкой на нормы и особые'
+      + ' случаи, которые закон регулирует отдельно (общая собственность, жилое помещение, участок'
+      + ' и здание на нём). Институты, которых нет в заголовке и плане раздела (например, закладная'
+      + ' в параграфе о предмете и регистрации), не разбирай. Объём —'
       + ' 4500-6000 знаков без пробелов.';
     user += `\n\n${SECTION_CHECKLIST}`;
   } else if (task.kind === 'introduction') {
@@ -1917,6 +1933,7 @@ app.post('/api/section-review', async (req, res) => {
         + `План работы:\n${String(plan || '').slice(0, 4000)}\n\n`
         + `Раздел: ${heading || '—'}\n`
         + (t.brief ? `Что обещано в плане: ${t.brief}\n` : '')
+        + (reviewTitles(src) ? `\n${reviewTitles(src)}\n` : '')
         + `\nТЕКСТ РАЗДЕЛА:\n${src}` },
     ];
     const { upstream } = await callOpenRouterWithFallback(messages);
