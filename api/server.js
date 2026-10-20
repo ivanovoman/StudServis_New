@@ -12,7 +12,7 @@ const { generateFragmentDocx, generateFullDocx } = require('./docxExport');
 const { resolveProviders, modelsFor } = require('./providers');
 const { fetchDossier, dossierBlock } = require('./dossier');
 const { findColloquial, fixRegister } = require('./register');
-const { stripDisclaimers, appendBeforeTail, fixMixedScript } = require('./cleanup');
+const { stripDisclaimers, appendBeforeTail, fixMixedScript, stripBoldHeadings } = require('./cleanup');
 const { createSourcePins, pinKeys, foundFromList } = require('./worksources');
 const { localChecks, parseReview, REVIEW_PROMPT, reviseMessages, rejectRevision } = require('./textreview');
 
@@ -1160,36 +1160,47 @@ const EXPAND_RATIO = 0.5;
  * ходов. Попыток не больше двух: если и после них коротко, отдаём как
  * есть и говорим об этом пользователю, а не крутим цикл бесконечно.
  */
-async function writeFullPiece(task, ctx, send) {
+async function writeFullPiece(task, ctx, send, opts = {}) {
   // Оговорки модели («Генеративные языковые модели не обладают
   // собственным мнением…») срезаем сразу — см. api/cleanup.js. Если
   // от куска почти ничего не осталось, модель отказалась писать по
   // теме: одна повторная попытка, дальше добор объёма ниже.
   const clean = (raw, label) => {
-    const r = stripDisclaimers(fixMixedScript(raw).text);
+    const r = stripDisclaimers(stripBoldHeadings(fixMixedScript(raw).text).text);
     if (r.removed.length) {
       console.log(`Оговорка модели срезана (${label}), «${task.heading || task.title}»: ${r.removed.length}`);
       if (send) send({ disclaimer: { heading: task.heading || task.title, removed: r.removed.length } });
     }
     return r.text;
   };
-  let text = clean(await writePiece(task, ctx), 'раздел');
-  if (charsNoSpace(text) < 400) {
+  // Дописать готовый раздел по кнопке: основной проход пропускаем.
+  const fromText = opts.expandFrom ? String(opts.expandFrom) : '';
+  let text = fromText || clean(await writePiece(task, ctx), 'раздел');
+  if (!fromText && charsNoSpace(text) < 400) {
     try { text = clean(await writePiece(task, ctx), 'повтор'); } catch (e) { /* оставляем что есть */ }
   }
 
   const min = MIN_CHARS[task.kind];
 
   // Без нормы объёма добора нет, но проверка стиля ниже нужна всем.
-  const MAX_TRIES = min ? 2 : 0;
+  //
+  // Разделы сами не дописываем (решение заказчика): автоматический добор
+  // до 5000 знаков давал отступления, придуманные «функции» и повтор
+  // вопросов соседних параграфов, а эталон заказчика — 4015 знаков.
+  // Короткий раздел помечается, дописать можно кнопкой («Дописать» →
+  // opts.expandFrom), один проход. SECTION_AUTO_EXPAND=1 — вернуть старое.
+  let MAX_TRIES = min ? 2 : 0;
+  if (task.kind === 'section') {
+    MAX_TRIES = fromText ? 1 : (process.env.SECTION_AUTO_EXPAND === '1' ? 2 : 0);
+  }
   for (let attempt = 1; attempt <= MAX_TRIES; attempt += 1) {
     const have = charsNoSpace(text);
-    if (have >= min) break;
+    if (have >= min && !fromText) break;
 
     const target = TARGET_CHARS[task.kind] || min;
     // Меньше 400 знаков просить бессмысленно — это один абзац, модель
     // всё равно напишет больше.
-    const need = Math.max(400, Math.round((target - have) * EXPAND_RATIO));
+    const need = Math.max(400, Math.round(Math.max(target - have, 600) * EXPAND_RATIO));
     if (send) {
       send({
         expanding: {
@@ -1449,6 +1460,44 @@ async function readWholeAnswer(upstream) {
 }
 
 
+/**
+ * Короткий контрольный список в конце задания. Те же правила есть в
+ * системном промпте, но он длинный, и GigaChat их там не держит: в
+ * параграфе об ипотеке остались «автоматически», «неразрывно»,
+ * предложения по 40-70 слов и выдуманные «функции». Последние строки
+ * задания модель соблюдает заметно лучше.
+ */
+const SECTION_CHECKLIST = `ПРОВЕРЬ ПЕРЕД ОТВЕТОМ:
+1. Каждое утверждение о праве следует из названной нормы; не уверен — не пиши. Номер статьи — только если уверен.
+2. Без «всегда», «автоматически», «неразрывно», «в любом случае»: у правил есть исключения — «как правило», «если иное не предусмотрено законом».
+3. Ни одного предложения длиннее 30 слов. Абзац — 2-4 предложения.
+4. Только то, что охватывает заголовок и план этого раздела. Без отступлений, расчётов с выдуманными суммами, ссылок на «практику» без реквизитов акта и без отсылок к другим параграфам работы.
+5. Если раздел разбирает несколько элементов (функции, признаки) — вводная фраза, затем каждый элемент отдельным абзацем, который НАЧИНАЕТСЯ с названия элемента жирным: «**Обеспечительная функция** заключается в …». Подзаголовков отдельной строкой нет. Новых элементов, которых нет в плане, не придумывай.
+6. Закон при первом упоминании — полностью: «Федеральный закон от … № … „…“», дальше кратко.`;
+
+/**
+ * Заголовки остальных параграфов с их планами — чтобы модель знала,
+ * какие вопросы отданы соседям. Без этого параграф о понятии ипотеки
+ * разбирал распределение выручки и остаток долга, которым в плане
+ * отведён параграф 2.2, а заказчик это вычёркивал.
+ */
+function otherSections(plan, task) {
+  try {
+    const queue = buildQueue(parseOutline(String(plan || '')));
+    return queue
+      .filter((t) => t.kind === 'section' && t.number !== task.number)
+      .map((t) => {
+        const brief = String(t.brief || '').split('\n')
+          .filter((l) => !/^\s*(нормативн|переход|логика перехода)/i.test(l))
+          .join(' ').replace(/\s+/g, ' ').trim().slice(0, 300);
+        return `- ${t.heading}${brief ? `: ${brief}` : ''}`;
+      })
+      .join('\n');
+  } catch (e) {
+    return '';
+  }
+}
+
 async function writePiece(task, ctx, opts = {}) {
   const { plan, settings, done, sources, ownerKey } = ctx;
   const expand = opts.expand || null;
@@ -1524,6 +1573,7 @@ async function writePiece(task, ctx, opts = {}) {
 
   let user;
   if (expand) {
+    const others = otherSections(plan, task);
     // Написанную часть даём целиком: дописывать продолжение, видя лишь
     // краткую выжимку, нельзя — получится повтор уже сказанного.
     user = `Раздел ${task.heading || task.title} написан не полностью.`;
@@ -1532,10 +1582,23 @@ async function writePiece(task, ctx, opts = {}) {
     user += `\n\nДопиши примерно ${expand.need} знаков без пробелов — только`
           + ' новые абзацы, продолжающие этот текст. Повторять написанное'
           + ' выше нельзя.';
+    if (others) user += `\n\nВопросы этих параграфов не трогай:\n${others}`;
+    user += '\n\nНе вводи новых функций, признаков, видов и классификаций, которых нет в'
+      + ' плане раздела и в написанной части: их придумывание — ошибка, а не глубина.'
+      + ` Если добавить нечего — ответь пустой строкой.\n\n${SECTION_CHECKLIST}`;
   } else if (task.kind === 'section') {
     user = `Напиши раздел ${task.heading}.`;
     if (task.chapterTitle) user += `\nОн входит в главу «${task.chapterTitle}».`;
     if (task.brief) user += `\n\nПлан этого раздела:\n${task.brief}`;
+    const others = otherSections(plan, task);
+    if (others) user += `\n\nДругие параграфы работы — их вопросы здесь подробно не `
+      + `разбирай (можно коснуться, если без этого непонятна мысль). На эти параграфы не `
+      + `ссылайся и не пиши, что вопрос «рассматривается далее» или «относится к параграфу»:\n${others}`;
+    user += '\n\nРаскрой всё, что охватывает заголовок раздела, даже если в кратком плане'
+      + ' названо не всё: для понятия — признаки, участники, соотношение со смежными способами'
+      + ' или институтами того же уровня; для функций или видов — каждый элемент. Объём —'
+      + ' 4500-6000 знаков без пробелов.';
+    user += `\n\n${SECTION_CHECKLIST}`;
   } else if (task.kind === 'introduction') {
     user = 'Напиши введение к работе по плану выше.';
   } else {
@@ -1688,7 +1751,12 @@ app.post('/api/section', async (req, res) => {
         text: String(w.text || '').slice(0, 4000),
       }));
 
-    const raw = await writeFullPiece(task, { plan, settings, done, sources: found, ownerKey }, send);
+    const expandFrom = typeof req.body.expandText === 'string' && req.body.expandText.trim().length > 200
+      ? req.body.expandText : '';
+    const raw = await writeFullPiece(task, { plan, settings, done, sources: found, ownerKey }, send, { expandFrom });
+    if (expandFrom && charsNoSpace(raw) <= charsNoSpace(expandFrom) + 150) {
+      send({ notice: 'Модель не нашла, что добавить в границах плана раздела, — текст оставлен как был.' });
+    }
     const { text: unmarked, removed: markers } = stripLibraryMarkers(raw);
     if (markers) {
       console.log(`Убрано служебных пометок материалов: ${markers}`);

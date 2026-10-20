@@ -72,3 +72,13 @@ test('номер из перечня через запятую не припис
   const p = checkLawNames('Федеральный закон «О цифровых финансовых активах, цифровой валюте и о внесении изменений в отдельные законодательные акты Российской Федерации» от 25.11.2017 № 328-ФЗ');
   assert.strictEqual(p.length, 1);
 });
+
+test('docx: **жирный** становится полужирным, звёздочки в документ не попадают', () => {
+  const { textRuns } = require('../api/docxExport');
+  const rs = textRuns('**Обеспечительная функция** заключается в ** гарантии');
+  assert.strictEqual(rs.length, 2);
+  const j = rs.map((r) => JSON.stringify(r));
+  assert.ok(j[0].includes('"w:b"'));
+  assert.ok(!j[1].includes('"w:b"'));
+  assert.ok(!j.join('').includes('**'));
+});

@@ -204,4 +204,28 @@ function checkLawNames(text) {
   return problems;
 }
 
-module.exports = { LAWS, checkLawNames, numMentions };
+/**
+ * Законы из справочника, упомянутые в тексте, и есть ли у упоминания
+ * номер рядом. Название считается упоминанием закона, только если перед
+ * ним стоит «закон», «ФЗ» или открывающая кавычка: «договор об ипотеке» —
+ * это термин, а не ссылка на закон.
+ */
+function lawMentions(text) {
+  const src = String(text || '');
+  const nums = numMentions(src);
+  const out = [];
+  for (const law of LAWS) {
+    law.rx.lastIndex = 0;
+    let m;
+    while ((m = law.rx.exec(src))) {
+      const before = src.slice(Math.max(0, m.index - 40), m.index);
+      if (!/(?:закон[а-яё]*|ФЗ|№\s*\d+-(?:ФЗ|1))\s*(?:от\s+[\d.]+(?:\s*г\.)?\s*)?(?:№\s*[\d-]+[А-Я]*\s*)?[«"]?\s*$|[«"]\s*$/i.test(before)) continue;
+      const near = nums.some((n) => n.num === law.num
+        && Math.abs((n.start < m.index ? m.index - n.end : n.start - m.index)) < 200);
+      out.push({ law, start: m.index, withNum: near });
+    }
+  }
+  return out;
+}
+
+module.exports = { LAWS, checkLawNames, numMentions, lawMentions };

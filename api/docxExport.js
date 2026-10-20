@@ -209,9 +209,27 @@ function makeEmptyParagraph() {
 
 // Обычный абзац основного текста: Times New Roman 14pt, интервал 1.5,
 // отступ первой строки, выравнивание по ширине страницы, интервалы before/after = 0.
+/**
+ * Текст абзаца с выделением **жирным**. Модель выделяет так названия
+ * элементов, которые разбираются по очереди («**Обеспечительная
+ * функция** заключается…») — так оформил заказчик. Непарные звёздочки
+ * просто убираем, чтобы они не попали в документ.
+ */
+function textRuns(text) {
+  const src = fixDashes(String(text || ''));
+  const parts = src.split(/\*\*([^*\n]+?)\*\*/);
+  const runs = [];
+  parts.forEach((part, i) => {
+    const t = part.replace(/\*\*/g, '');
+    if (!t) return;
+    runs.push(new TextRun({ text: t, size: BODY_SIZE, font: FONT, ...(i % 2 === 1 ? { bold: true } : {}) }));
+  });
+  return runs.length ? runs : [new TextRun({ text: '', size: BODY_SIZE, font: FONT })];
+}
+
 function makeBodyParagraph(text) {
   return new Paragraph({
-    children: [new TextRun({ text: fixDashes(text), size: BODY_SIZE, font: FONT })],
+    children: textRuns(text),
     spacing: { before: 0, after: 0, line: 360 }, // line: 360 = 1.5 интервала (240 = одинарный)
     indent: { firstLine: 720 },
     alignment: AlignmentType.JUSTIFIED,
@@ -237,9 +255,7 @@ function makeBodyParagraphWithNotes(text, sources, refs) {
   const children = [];
   for (const part of parts) {
     if (part.type === 'text') {
-      if (part.text) {
-        children.push(new TextRun({ text: fixDashes(part.text), size: BODY_SIZE, font: FONT }));
-      }
+      if (part.text) children.push(...textRuns(part.text));
       continue;
     }
     const source = sources[part.source - 1] || {};
@@ -706,6 +722,7 @@ async function generateFullDocx({ topic, introduction, sections, conclusion, cha
 }
 
 module.exports = {
+  textRuns,
   generateFragmentDocx,
   generateFullDocx,
   buildBibliography,

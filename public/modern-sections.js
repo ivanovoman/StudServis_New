@@ -529,9 +529,9 @@
    * параллельные запросы отвечают отказом, а очередь на сервере всё
    * равно выстроит их друг за другом.
    */
-  function write(item, note) {
+  function write(item, note, expandText) {
     if (job) return Promise.reject('уже пишется ' + labelOf(job.id));
-    job = { id: item.id, status: 'Пишу…', from: Date.now() };
+    job = { id: item.id, status: expandText ? 'Дописываю…' : 'Пишу…', from: Date.now() };
     drawNav();
 
     var settings = window.StudCore.getSettings();
@@ -563,7 +563,24 @@
       sources: state.sources || [],
     };
     if (state.workId) payload.workId = state.workId;
+    if (expandText) payload.expandText = expandText;
     return streamPiece(item, '/api/section', payload);
+  }
+
+  /**
+   * Дописать раздел, который вышел короче нормы. Только по кнопке:
+   * автоматический добор давал отступления и придуманные «функции»,
+   * которые заказчик вычёркивал. Прежний вариант можно вернуть.
+   */
+  function expand(item, note) {
+    var p = state.pieces[item.position];
+    if (!p) return Promise.reject('раздел ещё не написан');
+    var before = { text: p.text, chars: p.chars, edited: p.edited, at: Date.now() };
+    return write(item, note, p.text).then(function () {
+      state.prev = state.prev || {};
+      state.prev[item.id] = before;
+      persist(state);
+    });
   }
 
   /**
@@ -640,6 +657,12 @@
     });
   }
 
+  // Сервер присылает {label, note}; старые сохранённые — строки.
+  function legalLine(x) {
+    if (typeof x === 'string') return x;
+    return (x && x.label ? x.label : '') + (x && x.note ? ' — ' + x.note : '');
+  }
+
   function paneWrite(item) {
     var kind = L.pieceKind(item);
     var target = L.targetFor(kind);
@@ -671,6 +694,9 @@
     var editBtn = el('button', 'btn ghost', 'Править');
     var cancelBtn = el('button', 'btn ghost', 'Отменить правку');
     cancelBtn.style.display = 'none';
+    var expandBtn = el('button', 'btn ghost', 'Дописать');
+    expandBtn.title = 'Раздел короче нормы: модель допишет недостающее в границах плана этого '
+      + 'раздела. Прежний вариант можно будет вернуть.';
     var analyzeBtn = el('button', 'btn ghost', 'Глубокий анализ');
     analyzeBtn.title = 'Разбор раздела: стиль, ритм, конкретика, сноски, факты для '
       + 'проверки, повторы, детектор ИИ и рецензия научного руководителя';
@@ -678,6 +704,7 @@
     var st = el('span', 'status');
     row.appendChild(writeBtn);
     row.appendChild(editBtn);
+    row.appendChild(expandBtn);
     row.appendChild(analyzeBtn);
     row.appendChild(cancelBtn);
     row.appendChild(undoBtn);
@@ -708,6 +735,8 @@
       editBtn.style.display = p ? '' : 'none';
       editBtn.disabled = mine;
       analyzeBtn.style.display = p && !editing ? '' : 'none';
+      expandBtn.style.display = p && !editing && L.volumeState(kind, p.chars) === 'short' ? '' : 'none';
+      expandBtn.disabled = !!job;
       analyzeBtn.disabled = !!reviewRuns[item.id] || mine;
       analyzeBtn.textContent = reviewRuns[item.id] ? 'Анализирую…'
         : (state.reviews && state.reviews[item.id] ? 'Анализ заново' : 'Глубокий анализ');
@@ -720,11 +749,11 @@
       var lg = state.legal && state.legal[item.id];
       if (lg && (lg.wrong || []).length) {
         legalBox.appendChild(el('div', 'warn-line', 'Проверьте ссылки на закон: '
-          + lg.wrong.join('; ')));
+          + lg.wrong.map(legalLine).join('; ')));
       }
       if (lg && (lg.unclear || []).length) {
         legalBox.appendChild(el('div', 'warn-line', 'Не удалось проверить: '
-          + lg.unclear.join('; ')));
+          + lg.unclear.map(legalLine).join('; ')));
       }
 
       if (editing) { reportBox.style.display = 'none'; lastSig = ''; return; }
@@ -807,6 +836,22 @@
 
     analyzeBtn.onclick = function () {
       analyze(item);
+      refresh();
+    };
+
+    expandBtn.onclick = function () {
+      st.dataset.keep = '';
+      var was = (state.pieces[item.position] || {}).chars || 0;
+      expand(item, note.value.trim()).then(function () {
+        var now = (state.pieces[item.position] || {}).chars || 0;
+        if (state.active === item.id) {
+          st.textContent = now > was + 150 ? 'Дописано: +' + fmt(now - was) + ' знаков'
+            : 'Добавить нечего в границах плана раздела — текст почти не изменился';
+          refresh(true);
+        }
+      }, function (err) {
+        if (state.active === item.id) st.textContent = 'Ошибка: ' + err;
+      });
       refresh();
     };
 

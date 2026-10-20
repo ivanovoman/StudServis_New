@@ -228,4 +228,24 @@ function fixMixedScript(text) {
   return { text: out, fixed };
 }
 
-module.exports = { relocateTransitions, fixMixedScript, hasDisclaimer, stripDisclaimers, splitTail, appendBeforeTail, TRANSITION };
+/**
+ * Жирные строки-подзаголовки внутри параграфа убираем.
+ *
+ * Заказчик выделяет жирным начало абзаца — название разбираемого
+ * элемента («**Обеспечительная функция** заключается…»). Модель на ту же
+ * просьбу ставит отдельную строку «**Вещно-обязательственная природа**»
+ * над абзацем — это подзаголовок четвёртого уровня, которого в
+ * курсовой нет. Абзац под ним остаётся, строка уходит.
+ *
+ * @returns {{text: string, removed: number}}
+ */
+function stripBoldHeadings(text) {
+  let removed = 0;
+  const out = String(text || '').split('\n').filter((line) => {
+    if (/^\s*(?:#{1,6}\s*)?\*\*[^*\n]{2,90}\*\*\s*[.:]?\s*$/.test(line)) { removed += 1; return false; }
+    return true;
+  }).join('\n').replace(/\n{3,}/g, '\n\n').trim();
+  return { text: out, removed };
+}
+
+module.exports = { stripBoldHeadings, relocateTransitions, fixMixedScript, hasDisclaimer, stripDisclaimers, splitTail, appendBeforeTail, TRANSITION };
